@@ -26,10 +26,10 @@ namespace Softgraph.TextMesh3D.Runtime
         [SerializeField]
         public Enum m_Output;
 
-        [SerializeField]
+        [SerializeField, Min(0f)]
         public float m_Extrusion;
 
-        [SerializeField, Tooltip("Em size in Unity units. Same visual size for every font, regardless of its UnitsPerEm.")]
+        [SerializeField, Min(0.0001f), Tooltip("Em size in Unity units. Same visual size for every font, regardless of its UnitsPerEm.")]
         public float m_Size;
 
         [SerializeField]
@@ -116,10 +116,25 @@ namespace Softgraph.TextMesh3D.Runtime
                 return null;
             }
 
-            using (var stream = new MemoryStream(m_FontData, false))
+            Typeface typeface = null;
+            try
             {
-                return new OpenFontReader().Read(stream);
+                using (var stream = new MemoryStream(m_FontData, false))
+                {
+                    typeface = new OpenFontReader().Read(stream);
+                }
             }
+            catch (Exception e)
+            {
+                Debug.LogError($"TextMesh3D: could not read font '{(m_Font != null ? m_Font.name : "?")}': {e.Message}", this);
+                return null;
+            }
+
+            if (typeface == null)
+            {
+                Debug.LogError($"TextMesh3D: font '{(m_Font != null ? m_Font.name : "?")}' is not a supported TrueType/OpenType font.", this);
+            }
+            return typeface;
         }
 
         // DestroyImmediate is only valid in edit mode; use Destroy while playing.
@@ -145,25 +160,68 @@ namespace Softgraph.TextMesh3D.Runtime
                 if (TryGetComponent<MeshRenderer>(out var rootRenderer)) Undo.RecordObject(rootRenderer, k_UndoName);
             }
 #endif
-            switch (m_Output)
+            try
             {
-                case Enum.Spline:
-                    DoSpline();
-                    break;
-                case Enum.Surface:
-                    DoSurface();
-                    break;
-                case Enum.Mesh:
-                    DoMesh();
-                    break;
+                if (!ValidateSettings())
+                {
+                    // keep the previous output untouched
+                }
+                else if (string.IsNullOrEmpty(m_Text))
+                {
+                    ClearPreviousOutput();
+                }
+                else
+                {
+                    switch (m_Output)
+                    {
+                        case Enum.Spline:
+                            DoSpline();
+                            break;
+                        case Enum.Surface:
+                            DoSurface();
+                            break;
+                        case Enum.Mesh:
+                            DoMesh();
+                            break;
+                    }
+                }
             }
+            catch (Exception e)
+            {
+                // Never leave the editor in a broken state; in edit mode the partial result can be undone.
+                Debug.LogError($"TextMesh3D: generation failed: {e.Message}", this);
+                Debug.LogException(e, this);
+            }
+            finally
+            {
 #if UNITY_EDITOR
-            if (recordUndo)
-            {
-                if (myText) Undo.RegisterCreatedObjectUndo(myText, k_UndoName);
-                Undo.CollapseUndoOperations(undoGroup);
-            }
+                if (recordUndo)
+                {
+                    if (myText) Undo.RegisterCreatedObjectUndo(myText, k_UndoName);
+                    Undo.CollapseUndoOperations(undoGroup);
+                }
 #endif
+            }
+        }
+
+        private bool ValidateSettings()
+        {
+            if (!(m_Size > 0f) || float.IsInfinity(m_Size))
+            {
+                Debug.LogError($"TextMesh3D: Font Size must be greater than 0 (is {m_Size}).", this);
+                return false;
+            }
+            if (!(m_Extrusion >= 0f) || float.IsInfinity(m_Extrusion))
+            {
+                Debug.LogError($"TextMesh3D: Extrusion must be 0 or greater (is {m_Extrusion}).", this);
+                return false;
+            }
+            if (float.IsNaN(m_Spacing) || float.IsInfinity(m_Spacing))
+            {
+                Debug.LogError($"TextMesh3D: Spacing must be a finite number (is {m_Spacing}).", this);
+                return false;
+            }
+            return true;
         }
 
         private const string k_UndoName = "Generate TextMesh3D";
@@ -233,38 +291,79 @@ namespace Softgraph.TextMesh3D.Runtime
 
             // m_Size is the em size in Unity units, so text has the same size for any font regardless of UnitsPerEm.
             var scale = GetFontScale(typeface, m_Size);
+            var lineHeight = GetLineHeight(typeface) * scale;
+            var spaceAdvance = GetAdvanceWidth(typeface, typeface.GetGlyphIndex(' ')) * scale;
+            var missing = new List<char>();
 
             for (int i = 0; i < objToSpawn.Length; i++)
             {
-                //Adding gameObject with a name
-                if (m_Text[i].ToString() == " ")
-                {
-                    objToSpawn[i] = new GameObject("Space");
-                }
-                else
-                {
-                    objToSpawn[i] = new GameObject("Glyph - " + m_Text[i]);
-                }
+                char ch = m_Text[i];
+
+                //One object per character, so objToSpawn[i] always matches m_Text[i]
+                objToSpawn[i] = new GameObject(GetCharacterObjectName(ch));
                 objToSpawn[i].transform.parent = myText.transform;
+                objToSpawn[i].transform.localPosition = new Vector3(advanceWidth.x, advanceWidth.y, advanceWidth.z);
 
-                //Adding SplineContainer Component
-                objToSpawn[i].AddComponent<SplineContainer>();
-
-                var container = objToSpawn[i].GetComponent<SplineContainer>();
+                var container = objToSpawn[i].AddComponent<SplineContainer>();
                 container.RemoveSplineAt(0);
 
-                //Adding Glyph to gameObjects
-                ushort glyphIndex = typeface.GetGlyphIndex(m_Text[i]);
+                //Control characters have no glyph: \n starts a new line (text runs along +X, lines go down -Z),
+                //\t advances 4 spaces, others take no space. Without this they were drawn as "missing glyph" boxes.
+                if (ch == '\n')
+                {
+                    advanceWidth.x = 0f;
+                    advanceWidth.z -= lineHeight;
+                    continue;
+                }
+                if (ch == '\t')
+                {
+                    advanceWidth.x += 4f * spaceAdvance + m_Spacing;
+                    continue;
+                }
+                if (char.IsControl(ch) || char.IsSurrogate(ch))
+                {
+                    continue;
+                }
+
+                ushort glyphIndex = typeface.GetGlyphIndex(ch);
+                if (glyphIndex == 0 && !char.IsWhiteSpace(ch) && !missing.Contains(ch))
+                {
+                    missing.Add(ch); // still drawn as the font's "missing glyph" (.notdef) shape
+                }
+
                 Glyph glyph = typeface.GetGlyph(glyphIndex);
                 GlyphSplineReader glyphSplineReader = new GlyphSplineReader(container);
                 glyphSplineReader.Read(glyph, scale);
 
-                //Place the glyph at the pen position, then move the pen by the font's advance width.
+                //Move the pen by the font's advance width.
                 //The advance includes the side bearings, so it works for narrow glyphs and spaces alike.
-                objToSpawn[i].transform.localPosition = new Vector3(advanceWidth.x, advanceWidth.y, advanceWidth.z);
                 advanceWidth.x += GetAdvanceWidth(typeface, glyphIndex) * scale + m_Spacing;
             }
+
+            if (missing.Count > 0)
+            {
+                Debug.LogWarning($"TextMesh3D: font '{fontName}' has no glyph for: {string.Join(" ", missing.Select(c => $"'{c}' (U+{(int)c:X4})"))}", this);
+            }
             return true;
+        }
+
+        private static string GetCharacterObjectName(char ch)
+        {
+            switch (ch)
+            {
+                case ' ': return "Space";
+                case '\n': return "Line Break";
+                case '\t': return "Tab";
+            }
+            if (char.IsControl(ch) || char.IsSurrogate(ch)) return $"Control U+{(int)ch:X4}";
+            return "Glyph - " + ch;
+        }
+
+        /// <summary>Baseline-to-baseline distance in font units.</summary>
+        private static float GetLineHeight(Typeface typeface)
+        {
+            float height = typeface.Ascender - typeface.Descender + typeface.LineGap;
+            return height > 0f ? height : (typeface.UnitsPerEm > 0 ? typeface.UnitsPerEm * 1.2f : 1200f);
         }
 
         /// <summary>Font units to Unity units: one em (UnitsPerEm font units) becomes <paramref name="size"/> units.</summary>
@@ -312,17 +411,19 @@ namespace Softgraph.TextMesh3D.Runtime
 
             for (int i = 0; i < objToSpawn.Length; i++)
             {
-                if (m_Text[i] == ' ')
+                var splineContainer = objToSpawn[i].GetComponent<SplineContainer>();
+                var contours = BuildContours(splineContainer);
+
+                // Spaces, line breaks, tabs, empty glyphs: nothing to mesh
+                if (contours.Count == 0)
                 {
+                    SafeDestroy(splineContainer);
                     continue;
                 }
 
-                var splineContainer = objToSpawn[i].GetComponent<SplineContainer>();
                 objToSpawn[i].AddComponent<MeshFilter>();
                 // sharedMaterial: .material would instantiate (and leak) a copy in edit mode
                 objToSpawn[i].AddComponent<MeshRenderer>().sharedMaterial = m_Material;
-
-                var contours = BuildContours(splineContainer);
 
                 // Order: walls, then top caps, then bottom caps (same order as before the refactor).
                 var walls = new List<Mesh>();
@@ -347,9 +448,17 @@ namespace Softgraph.TextMesh3D.Runtime
                         if (other.isHole && other.parent == c) holes.Add(other);
                     }
 
-                    BuildCaps(contours[c], holes, height, out var top, out var bottom);
-                    if (top != null) tops.Add(top);
-                    if (bottom != null) bottoms.Add(bottom);
+                    // A malformed outline must not abort the whole text: skip its caps (walls are kept) and report it.
+                    try
+                    {
+                        BuildCaps(contours[c], holes, height, out var top, out var bottom);
+                        if (top != null) tops.Add(top);
+                        if (bottom != null) bottoms.Add(bottom);
+                    }
+                    catch (Exception e)
+                    {
+                        Debug.LogWarning($"TextMesh3D: could not fill an outline of '{m_Text[i]}' ({objToSpawn[i].name}): {e.Message}", objToSpawn[i]);
+                    }
                 }
 
                 var parts = new List<Mesh>(walls.Count + tops.Count + bottoms.Count);

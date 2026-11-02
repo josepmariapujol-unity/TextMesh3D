@@ -5,6 +5,7 @@ using UnityEditor;
 namespace Softgraph.TextMesh3D.Editor
 {
     [CustomEditor(typeof(TextMesh3DContainer))]
+    [CanEditMultipleObjects]
     public class TextMesh3DContainerEditor : UnityEditor.Editor
     {
         SerializedProperty m_Text;
@@ -72,9 +73,12 @@ namespace Softgraph.TextMesh3D.Editor
 
             serializedObject.ApplyModifiedProperties();
 
-            if (GUILayout.Button("Apply"))
+            if (GUILayout.Button(targets.Length > 1 ? $"Apply ({targets.Length} objects)" : "Apply"))
             {
-                ((TextMesh3DContainer) target).Function();
+                foreach (var t in targets)
+                {
+                    ((TextMesh3DContainer) t).Function();
+                }
             }
         }
     }

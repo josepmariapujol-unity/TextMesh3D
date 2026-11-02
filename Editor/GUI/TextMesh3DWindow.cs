@@ -4,9 +4,9 @@ using Softgraph.TextMesh3D.Runtime;
 
 namespace Softgraph.TextMesh3D.Editor
 {
+    /// <summary>Edits the TextMesh3D object that is currently selected (follows the selection).</summary>
     public class TextMesh3DWindow : EditorWindow
     {
-        // Serialized properties for the editor window
         private SerializedObject serializedObject;
         private SerializedProperty m_Text;
         private SerializedProperty m_Font;
@@ -18,7 +18,6 @@ namespace Softgraph.TextMesh3D.Editor
         private SerializedProperty m_Size;
         private SerializedProperty m_CurveSegments;
 
-        // A reference to the target TextMesh3DContainer script
         private TextMesh3DContainer targetContainer;
 
         private bool showInfo;
@@ -26,50 +25,54 @@ namespace Softgraph.TextMesh3D.Editor
         [MenuItem("Window/TextMesh3D")]
         public static void OpenWindow()
         {
-            // Open the window
-            TextMesh3DWindow window = (TextMesh3DWindow)GetWindow(typeof(TextMesh3DWindow));
-            window.minSize = new Vector2(600, 400);
+            var window = GetWindow<TextMesh3DWindow>("TextMesh3D");
+            window.minSize = new Vector2(300, 250);
             window.Show();
         }
 
-        private void OnEnable()
+        private void OnEnable() => BindToSelection();
+        private void OnSelectionChange() { BindToSelection(); Repaint(); }
+        private void OnHierarchyChange()
         {
-            // Optionally find and assign a TextMesh3DContainer in the scene
-            targetContainer = FindFirstObjectByType<TextMesh3DContainer>();
+            // The edited object may have been deleted (Unity's == null is true for destroyed objects)
+            if (targetContainer == null && serializedObject != null) { BindToSelection(); Repaint(); }
+        }
 
-            if (targetContainer != null)
-            {
-                serializedObject = new SerializedObject(targetContainer);
+        private void BindToSelection()
+        {
+            var selected = Selection.activeGameObject;
+            var container = selected != null ? selected.GetComponentInParent<TextMesh3DContainer>() : null;
+            if (container == targetContainer && serializedObject != null) return;
 
-                m_Text = serializedObject.FindProperty("m_Text");
-                m_Font = serializedObject.FindProperty("m_Font");
-                m_Output = serializedObject.FindProperty("m_Output");
-                m_Extrusion = serializedObject.FindProperty("m_Extrusion");
-                m_Material = serializedObject.FindProperty("m_Material");
-                m_Spacing = serializedObject.FindProperty("m_Spacing");
-                m_GroupOutput = serializedObject.FindProperty("m_GroupOutput");
-                m_Size = serializedObject.FindProperty("m_Size");
-                m_CurveSegments = serializedObject.FindProperty("m_CurveSegments");
-            }
+            targetContainer = container;
+            serializedObject = container != null ? new SerializedObject(container) : null;
+            if (serializedObject == null) return;
+
+            m_Text = serializedObject.FindProperty("m_Text");
+            m_Font = serializedObject.FindProperty("m_Font");
+            m_Output = serializedObject.FindProperty("m_Output");
+            m_Extrusion = serializedObject.FindProperty("m_Extrusion");
+            m_Material = serializedObject.FindProperty("m_Material");
+            m_Spacing = serializedObject.FindProperty("m_Spacing");
+            m_GroupOutput = serializedObject.FindProperty("m_GroupOutput");
+            m_Size = serializedObject.FindProperty("m_Size");
+            m_CurveSegments = serializedObject.FindProperty("m_CurveSegments");
         }
 
         private void OnGUI()
         {
-            if (targetContainer == null)
+            if (targetContainer == null || serializedObject == null || serializedObject.targetObject == null)
             {
-                EditorGUILayout.HelpBox("No TextMesh3DContainer found in the scene.", MessageType.Warning);
-                if (GUILayout.Button("Refresh"))
+                EditorGUILayout.HelpBox("Select a TextMesh3D object to edit it here.", MessageType.Info);
+                if (GUILayout.Button("Create TextMesh3D"))
                 {
-                    targetContainer = FindFirstObjectByType<TextMesh3DContainer>();
-                    if (targetContainer != null)
-                    {
-                        serializedObject = new SerializedObject(targetContainer);
-                        OnEnable();
-                    }
+                    TextMesh3DMenu.CreateTextGameObject(null);
+                    BindToSelection();
                 }
                 return;
             }
 
+            EditorGUILayout.LabelField("Editing", targetContainer.name, EditorStyles.boldLabel);
             serializedObject.Update();
 
             EditorGUILayout.PropertyField(m_Text, new GUIContent("Text"));
