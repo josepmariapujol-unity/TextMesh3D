@@ -23,18 +23,18 @@ namespace Softgraph.TextMesh3D.Tests
             m_Go = new GameObject("TextMesh3D PlayMode Test");
             var container = m_Go.AddComponent<TextMesh3DContainer>();
 #if UNITY_EDITOR
-            container.m_Font = UnityEditor.AssetDatabase.LoadAssetAtPath<Font>("Packages/com.softgraph.textmesh3d/Editor/Resources/Fonts/Roboto.ttf");
+            container.Font = UnityEditor.AssetDatabase.LoadAssetAtPath<Font>("Packages/com.softgraph.textmesh3d/Editor/Resources/Fonts/Roboto.ttf");
 #endif
-            Assert.IsNotNull(container.m_Font, "Test font not found");
-            container.m_Text = "Ab";
-            container.m_Output = TextMesh3DContainer.Enum.Mesh;
-            container.m_Size = 1f;
-            container.m_Extrusion = 1f;
+            Assert.IsNotNull(container.Font, "Test font not found");
+            container.Text = "Ab";
+            container.Output = TextMesh3DContainer.OutputMode.Mesh;
+            container.Size = 1f;
+            container.Extrusion = 1f;
 
-            container.Function();
+            container.Generate();
             yield return null;
-            container.m_Text = "Abc";
-            container.Function();
+            container.Text = "Abc";
+            container.Generate();
             yield return null; // Destroy() is deferred to end of frame
 
             Assert.AreEqual(1, container.transform.childCount, "Old output was not destroyed");
@@ -55,20 +55,20 @@ namespace Softgraph.TextMesh3D.Tests
             m_Go = new GameObject("TextMesh3D PlayMode Leak Test");
             var container = m_Go.AddComponent<TextMesh3DContainer>();
 #if UNITY_EDITOR
-            container.m_Font = UnityEditor.AssetDatabase.LoadAssetAtPath<Font>("Packages/com.softgraph.textmesh3d/Editor/Resources/Fonts/Roboto.ttf");
+            container.Font = UnityEditor.AssetDatabase.LoadAssetAtPath<Font>("Packages/com.softgraph.textmesh3d/Editor/Resources/Fonts/Roboto.ttf");
 #endif
-            container.m_Text = "Abc";
-            container.m_Output = TextMesh3DContainer.Enum.Mesh;
-            container.m_Size = 1f;
-            container.m_Extrusion = 1f;
+            container.Text = "Abc";
+            container.Output = TextMesh3DContainer.OutputMode.Mesh;
+            container.Size = 1f;
+            container.Extrusion = 1f;
 
-            container.Function();
+            container.Generate();
             yield return null;
             int baseline = Resources.FindObjectsOfTypeAll<Mesh>().Length;
 
             for (int i = 0; i < 5; i++)
             {
-                container.Function();
+                container.Generate();
                 yield return null; // Destroy() runs at end of frame
             }
 

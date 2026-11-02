@@ -23,19 +23,19 @@ namespace Softgraph.TextMesh3D.Editor
             ObjectFactory.PlaceGameObject(gameObject, parent);
 
             var container = gameObject.GetComponent<TextMesh3DContainer>();
-            container.m_Text = "New Text";
-            container.m_Font = LoadDefault<Font>(k_DefaultFontPath);
-            container.m_Output = TextMesh3DContainer.Enum.Mesh;
-            container.m_Size = 1f;
-            container.m_Material = LoadDefault<Material>(k_DefaultMaterialPath);
-            container.m_Extrusion = 0.2f; // m_Size is the em height in Unity units, so 1 => capitals ~0.7 units tall
-            container.m_Spacing = 0f;
-            container.m_GroupOutput = false;
+            container.Text = "New Text";
+            container.Font = LoadDefault<Font>(k_DefaultFontPath);
+            container.Output = TextMesh3DContainer.OutputMode.Mesh;
+            container.Size = 1f;
+            container.Material = LoadDefault<Material>(k_DefaultMaterialPath);
+            container.Extrusion = 0.2f; // m_Size is the em height in Unity units, so 1 => capitals ~0.7 units tall
+            container.Spacing = 0f;
+            container.GroupOutput = false;
 
             // Show the text right away instead of an empty object
-            if (container.m_Font != null)
+            if (container.Font != null)
             {
-                container.Function();
+                container.Generate();
             }
 
             Selection.activeGameObject = gameObject;

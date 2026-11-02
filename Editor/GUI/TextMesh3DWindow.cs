@@ -107,7 +107,7 @@ namespace Softgraph.TextMesh3D.Editor
 
             if (GUILayout.Button("Apply"))
             {
-                targetContainer.Function();
+                targetContainer.Generate();
             }
         }
     }

@@ -1,151 +1,90 @@
 using System;
 using System.Collections.Generic;
-using Unity.Mathematics;
-using UnityEngine.Splines;
-using Typography.OpenFont;
 using System.IO;
 using System.Linq;
+using Typography.OpenFont;
+using Unity.Mathematics;
 using UnityEngine;
+using UnityEngine.Splines;
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
 
 namespace Softgraph.TextMesh3D.Runtime
 {
+    /// <summary>
+    /// Converts a string into 3D text using the glyph outlines of a TrueType/OpenType font:
+    /// splines, flat surfaces or extruded meshes. One child object per character, or one merged mesh
+    /// on this object when Group Output is enabled.
+    /// </summary>
+    /// <remarks>
+    /// This file: settings, public API and layout. See TextMesh3DContainer.FontData.cs (font loading) and
+    /// TextMesh3DContainer.Meshing.cs (outline classification, triangulation, mesh building).
+    /// </remarks>
     [DisallowMultipleComponent]
     [AddComponentMenu("Mesh/TextMesh3D - Text")]
     [RequireComponent(typeof(MeshFilter), typeof(MeshRenderer))]
-    public class TextMesh3DContainer : MonoBehaviour
+    public partial class TextMesh3DContainer : MonoBehaviour
     {
-        [Header("Enter prompt"), Multiline]
-        public String m_Text;
-
-        [SerializeField]
-        public Font m_Font;
-
-        [SerializeField]
-        public Enum m_Output;
-
-        [SerializeField, Min(0f)]
-        public float m_Extrusion;
-
-        [SerializeField, Min(0.0001f), Tooltip("Em size in Unity units. Same visual size for every font, regardless of its UnitsPerEm.")]
-        public float m_Size;
-
-        [SerializeField]
-        public Material m_Material;
-
-        [SerializeField]
-        public float m_Spacing;
-
-        [SerializeField, Tooltip("Surface/Mesh only: merge all glyphs into one mesh on this object instead of one child object per glyph.")]
-        public bool m_GroupOutput;
-
-        [SerializeField, Range(1, 32), Tooltip("Points per curved outline segment. Higher gives smoother curves and more triangles.")]
-        public int m_CurveSegments = 3;
-
-        public enum Enum
+        public enum OutputMode
         {
             Spline,
             Surface,
             Mesh
         }
 
-        private GameObject[] objToSpawn;
-        private SplineContainer[] m_Spline;
+        // Serialized names (m_*) are kept from earlier versions so existing scenes keep their values.
+        [SerializeField, Multiline, Tooltip("Text to generate. Supports line breaks (\\n) and tabs.")]
+        private string m_Text;
 
-        [SerializeField][HideInInspector] private GameObject myText;
+        [SerializeField, Tooltip("TrueType (.ttf) or OpenType (.otf) font.")]
+        private Font m_Font;
 
-        // Raw bytes of m_Font's source file (.ttf/.otf). Unity's Font asset does not expose the
-        // original file at runtime, so the editor caches it here to make generation work in builds.
-        [SerializeField][HideInInspector] private byte[] m_FontData;
-        [SerializeField][HideInInspector] private string m_FontDataSource;
+        [SerializeField, Tooltip("Spline: outlines only. Surface: flat filled shapes. Mesh: extruded solids.")]
+        private OutputMode m_Output;
 
-#if UNITY_EDITOR
-        private void OnValidate()
-        {
-            CacheFontData();
-        }
+        [SerializeField, Min(0f), Tooltip("Mesh only: depth of the extrusion in Unity units.")]
+        private float m_Extrusion;
 
-        /// <summary>Editor only: reads the font file behind m_Font into m_FontData when the font changes.</summary>
-        public void CacheFontData()
-        {
-            var path = m_Font != null ? AssetDatabase.GetAssetPath(m_Font) : null;
+        [SerializeField, Min(0.0001f), Tooltip("Em size in Unity units. Same visual size for every font, regardless of its UnitsPerEm.")]
+        private float m_Size;
 
-            if (string.IsNullOrEmpty(path))
-            {
-                if (m_FontData != null)
-                {
-                    m_FontData = null;
-                    m_FontDataSource = null;
-                    MarkDirty();
-                }
-                return;
-            }
+        [SerializeField]
+        private Material m_Material;
 
-            if (m_FontData != null && m_FontData.Length > 0 && m_FontDataSource == path)
-                return;
+        [SerializeField, Tooltip("Extra space added after every character, in Unity units (can be negative).")]
+        private float m_Spacing;
 
-            var fullPath = Path.GetFullPath(path); // resolves Packages/... to the real location
-            if (!File.Exists(fullPath))
-            {
-                Debug.LogError($"TextMesh3D: font file not found at '{path}'.", this);
-                return;
-            }
+        [SerializeField, Tooltip("Surface/Mesh only: merge all glyphs into one mesh on this object instead of one child object per glyph.")]
+        private bool m_GroupOutput;
 
-            m_FontData = File.ReadAllBytes(fullPath);
-            m_FontDataSource = path;
-            MarkDirty();
-        }
+        [SerializeField, Range(1, 32), Tooltip("Points per curved outline segment. Higher gives smoother curves and more triangles.")]
+        private int m_CurveSegments = 3;
 
-        private void MarkDirty()
-        {
-            if (!Application.isPlaying)
-                EditorUtility.SetDirty(this);
-        }
-#endif
+        [SerializeField, HideInInspector, UnityEngine.Serialization.FormerlySerializedAs("m_GeneratedRoot")]
+        private GameObject m_GeneratedRoot;
 
-        private Typeface LoadTypeface()
-        {
-#if UNITY_EDITOR
-            CacheFontData();
-#endif
-            if (m_FontData == null || m_FontData.Length == 0)
-            {
-                Debug.LogError("TextMesh3D: no font data. Assign a .ttf/.otf font in the editor before generating.", this);
-                return null;
-            }
+        // One object per character of m_Text, valid during a Generate() call
+        private GameObject[] m_GlyphObjects;
 
-            Typeface typeface = null;
-            try
-            {
-                using (var stream = new MemoryStream(m_FontData, false))
-                {
-                    typeface = new OpenFontReader().Read(stream);
-                }
-            }
-            catch (Exception e)
-            {
-                Debug.LogError($"TextMesh3D: could not read font '{(m_Font != null ? m_Font.name : "?")}': {e.Message}", this);
-                return null;
-            }
+        public string Text { get => m_Text; set => m_Text = value; }
+        public Font Font { get => m_Font; set => m_Font = value; }
+        public OutputMode Output { get => m_Output; set => m_Output = value; }
+        public float Extrusion { get => m_Extrusion; set => m_Extrusion = value; }
+        public float Size { get => m_Size; set => m_Size = value; }
+        public Material Material { get => m_Material; set => m_Material = value; }
+        public float Spacing { get => m_Spacing; set => m_Spacing = value; }
+        public bool GroupOutput { get => m_GroupOutput; set => m_GroupOutput = value; }
+        public int CurveSegments { get => m_CurveSegments; set => m_CurveSegments = value; }
 
-            if (typeface == null)
-            {
-                Debug.LogError($"TextMesh3D: font '{(m_Font != null ? m_Font.name : "?")}' is not a supported TrueType/OpenType font.", this);
-            }
-            return typeface;
-        }
+        /// <summary>The object holding the generated per-character children (null when grouped or not generated).</summary>
+        public GameObject GeneratedRoot => m_GeneratedRoot;
 
-        // DestroyImmediate is only valid in edit mode; use Destroy while playing.
-        private static void SafeDestroy(UnityEngine.Object obj)
-        {
-            if (obj == null) return;
-            if (Application.isPlaying) Destroy(obj);
-            else DestroyImmediate(obj);
-        }
+        [Obsolete("Use Generate() instead.")]
+        public void Function() => Generate();
 
-        public void Function()
+        /// <summary>Regenerates the output from the current settings. In edit mode this is one undo step.</summary>
+        public void Generate()
         {
 #if UNITY_EDITOR
             // In edit mode, one Apply is one undo step: it restores the previous output (and grouped mesh).
@@ -174,14 +113,14 @@ namespace Softgraph.TextMesh3D.Runtime
                 {
                     switch (m_Output)
                     {
-                        case Enum.Spline:
-                            DoSpline();
+                        case OutputMode.Spline:
+                            LayoutGlyphs();
                             break;
-                        case Enum.Surface:
-                            DoSurface();
+                        case OutputMode.Surface:
+                            if (LayoutGlyphs()) BuildGlyphMeshes(extrude: false);
                             break;
-                        case Enum.Mesh:
-                            DoMesh();
+                        case OutputMode.Mesh:
+                            if (LayoutGlyphs()) BuildGlyphMeshes(extrude: true);
                             break;
                     }
                 }
@@ -197,7 +136,7 @@ namespace Softgraph.TextMesh3D.Runtime
 #if UNITY_EDITOR
                 if (recordUndo)
                 {
-                    if (myText) Undo.RegisterCreatedObjectUndo(myText, k_UndoName);
+                    if (m_GeneratedRoot) Undo.RegisterCreatedObjectUndo(m_GeneratedRoot, k_UndoName);
                     Undo.CollapseUndoOperations(undoGroup);
                 }
 #endif
@@ -239,28 +178,28 @@ namespace Softgraph.TextMesh3D.Runtime
 
             if (Application.isPlaying)
             {
-                if (myText)
+                if (m_GeneratedRoot)
                 {
-                    foreach (var mf in myText.GetComponentsInChildren<MeshFilter>(true))
+                    foreach (var mf in m_GeneratedRoot.GetComponentsInChildren<MeshFilter>(true))
                     {
                         if (mf.sharedMesh != null && IsGeneratedMesh(mf.sharedMesh)) Destroy(mf.sharedMesh);
                     }
-                    Destroy(myText);
+                    Destroy(m_GeneratedRoot);
                 }
                 if (ownsRootMesh) Destroy(rootMesh);
             }
 #if UNITY_EDITOR
-            else if (myText)
+            else if (m_GeneratedRoot)
             {
-                Undo.DestroyObjectImmediate(myText);
+                Undo.DestroyObjectImmediate(m_GeneratedRoot);
             }
 #endif
-            else if (myText)
+            else if (m_GeneratedRoot)
             {
-                DestroyImmediate(myText);
+                DestroyImmediate(m_GeneratedRoot);
             }
 
-            myText = null;
+            m_GeneratedRoot = null;
             if (ownsRootMesh) rootFilter.sharedMesh = null;
         }
 
@@ -274,20 +213,20 @@ namespace Softgraph.TextMesh3D.Runtime
 #endif
         }
 
-        private bool DoSpline()
+        /// <summary>Creates one object per character with its outline splines, positioned by the font's metrics.</summary>
+        private bool LayoutGlyphs()
         {
             Typeface typeface = LoadTypeface();
             if (typeface == null) return false;
 
             var fontName = m_Font != null ? m_Font.name : "TextMesh3D";
             ClearPreviousOutput();
-            myText = new GameObject(fontName);
-            myText.transform.SetParent(transform, false);
+            m_GeneratedRoot = new GameObject(fontName);
+            m_GeneratedRoot.transform.SetParent(transform, false);
 
-            objToSpawn = new GameObject[m_Text.Length];
-            m_Spline = new SplineContainer[m_Text.Length];
+            m_GlyphObjects = new GameObject[m_Text.Length];
 
-            var advanceWidth = float3.zero;
+            var pen = float3.zero;
 
             // m_Size is the em size in Unity units, so text has the same size for any font regardless of UnitsPerEm.
             var scale = GetFontScale(typeface, m_Size);
@@ -295,29 +234,29 @@ namespace Softgraph.TextMesh3D.Runtime
             var spaceAdvance = GetAdvanceWidth(typeface, typeface.GetGlyphIndex(' ')) * scale;
             var missing = new List<char>();
 
-            for (int i = 0; i < objToSpawn.Length; i++)
+            for (int i = 0; i < m_GlyphObjects.Length; i++)
             {
                 char ch = m_Text[i];
 
-                //One object per character, so objToSpawn[i] always matches m_Text[i]
-                objToSpawn[i] = new GameObject(GetCharacterObjectName(ch));
-                objToSpawn[i].transform.parent = myText.transform;
-                objToSpawn[i].transform.localPosition = new Vector3(advanceWidth.x, advanceWidth.y, advanceWidth.z);
+                //One object per character, so m_GlyphObjects[i] always matches m_Text[i]
+                m_GlyphObjects[i] = new GameObject(GetCharacterObjectName(ch));
+                m_GlyphObjects[i].transform.parent = m_GeneratedRoot.transform;
+                m_GlyphObjects[i].transform.localPosition = new Vector3(pen.x, pen.y, pen.z);
 
-                var container = objToSpawn[i].AddComponent<SplineContainer>();
+                var container = m_GlyphObjects[i].AddComponent<SplineContainer>();
                 container.RemoveSplineAt(0);
 
                 //Control characters have no glyph: \n starts a new line (text runs along +X, lines go down -Z),
                 //\t advances 4 spaces, others take no space. Without this they were drawn as "missing glyph" boxes.
                 if (ch == '\n')
                 {
-                    advanceWidth.x = 0f;
-                    advanceWidth.z -= lineHeight;
+                    pen.x = 0f;
+                    pen.z -= lineHeight;
                     continue;
                 }
                 if (ch == '\t')
                 {
-                    advanceWidth.x += 4f * spaceAdvance + m_Spacing;
+                    pen.x += 4f * spaceAdvance + m_Spacing;
                     continue;
                 }
                 if (char.IsControl(ch) || char.IsSurrogate(ch))
@@ -337,7 +276,7 @@ namespace Softgraph.TextMesh3D.Runtime
 
                 //Move the pen by the font's advance width.
                 //The advance includes the side bearings, so it works for narrow glyphs and spaces alike.
-                advanceWidth.x += GetAdvanceWidth(typeface, glyphIndex) * scale + m_Spacing;
+                pen.x += GetAdvanceWidth(typeface, glyphIndex) * scale + m_Spacing;
             }
 
             if (missing.Count > 0)
@@ -383,419 +322,12 @@ namespace Softgraph.TextMesh3D.Runtime
             return typeface.UnitsPerEm > 0 ? typeface.UnitsPerEm * 0.25f : 250f;
         }
 
-        private void DoSurface()
+        // DestroyImmediate is only valid in edit mode; use Destroy while playing.
+        private static void SafeDestroy(UnityEngine.Object obj)
         {
-            if (!DoSpline()) return;
-            BuildGlyphMeshes(extrude: false);
-        }
-
-        private void DoMesh()
-        {
-            if (!DoSpline()) return;
-            BuildGlyphMeshes(extrude: true);
-        }
-
-        /// <summary>One closed outline of a glyph, flattened to a polygon on the XZ plane.</summary>
-        private sealed class Contour
-        {
-            public Spline spline;
-            public List<Vector3> points;   // sampled outline, XZ plane
-            public float signedArea;       // shoelace area in (x, z); > 0 = counter-clockwise
-            public bool isHole;
-            public int parent = -1;        // for holes: index of the outline that contains it
-        }
-
-        private void BuildGlyphMeshes(bool extrude)
-        {
-            float height = extrude ? m_Extrusion : 0f;
-
-            for (int i = 0; i < objToSpawn.Length; i++)
-            {
-                var splineContainer = objToSpawn[i].GetComponent<SplineContainer>();
-                var contours = BuildContours(splineContainer);
-
-                // Spaces, line breaks, tabs, empty glyphs: nothing to mesh
-                if (contours.Count == 0)
-                {
-                    SafeDestroy(splineContainer);
-                    continue;
-                }
-
-                objToSpawn[i].AddComponent<MeshFilter>();
-                // sharedMaterial: .material would instantiate (and leak) a copy in edit mode
-                objToSpawn[i].AddComponent<MeshRenderer>().sharedMaterial = m_Material;
-
-                // Order: walls, then top caps, then bottom caps (same order as before the refactor).
-                var walls = new List<Mesh>();
-                var tops = new List<Mesh>();
-                var bottoms = new List<Mesh>();
-
-                if (extrude)
-                {
-                    foreach (var contour in contours)
-                    {
-                        walls.Add(BuildWalls(contour.points, height));
-                    }
-                }
-
-                for (int c = 0; c < contours.Count; c++)
-                {
-                    if (contours[c].isHole) continue;
-
-                    var holes = new List<Contour>();
-                    foreach (var other in contours)
-                    {
-                        if (other.isHole && other.parent == c) holes.Add(other);
-                    }
-
-                    // A malformed outline must not abort the whole text: skip its caps (walls are kept) and report it.
-                    try
-                    {
-                        BuildCaps(contours[c], holes, height, out var top, out var bottom);
-                        if (top != null) tops.Add(top);
-                        if (bottom != null) bottoms.Add(bottom);
-                    }
-                    catch (Exception e)
-                    {
-                        Debug.LogWarning($"TextMesh3D: could not fill an outline of '{m_Text[i]}' ({objToSpawn[i].name}): {e.Message}", objToSpawn[i]);
-                    }
-                }
-
-                var parts = new List<Mesh>(walls.Count + tops.Count + bottoms.Count);
-                parts.AddRange(walls);
-                parts.AddRange(tops);
-                parts.AddRange(bottoms);
-
-                var combined = Combine(parts, objToSpawn[i].name, recalculateNormals: extrude);
-                objToSpawn[i].GetComponent<MeshFilter>().sharedMesh = combined;
-
-                SafeDestroy(splineContainer);
-            }
-
-            if (m_GroupOutput)
-            {
-                GroupIntoRootMesh();
-            }
-        }
-
-        /// <summary>
-        /// Group Output: merges every glyph into one mesh on this object's MeshFilter / MeshRenderer and removes
-        /// the per-glyph objects. One object and one draw call for the whole text.
-        /// </summary>
-        private void GroupIntoRootMesh()
-        {
-            var glyphMeshes = new List<Mesh>();
-            var instances = new List<CombineInstance>();
-            int vertexCount = 0;
-
-            for (int i = 0; i < objToSpawn.Length; i++)
-            {
-                var filter = objToSpawn[i] != null ? objToSpawn[i].GetComponent<MeshFilter>() : null;
-                if (filter == null || filter.sharedMesh == null) continue;
-
-                glyphMeshes.Add(filter.sharedMesh);
-                vertexCount += filter.sharedMesh.vertexCount;
-                instances.Add(new CombineInstance
-                {
-                    mesh = filter.sharedMesh,
-                    transform = Matrix4x4.Translate(objToSpawn[i].transform.localPosition),
-                });
-            }
-
-            var grouped = new Mesh { name = m_Text };
-            if (vertexCount > 65535)
-            {
-                grouped.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
-            }
-            grouped.CombineMeshes(instances.ToArray(), true);
-
-            var rootFilter = GetComponent<MeshFilter>();
-            var rootRenderer = GetComponent<MeshRenderer>();
-            if (rootFilter == null) rootFilter = gameObject.AddComponent<MeshFilter>();
-            if (rootRenderer == null) rootRenderer = gameObject.AddComponent<MeshRenderer>();
-            rootFilter.sharedMesh = grouped;
-            rootRenderer.sharedMaterial = m_Material;
-
-            // The per-glyph objects were created in this same call, so they can go without an undo record.
-            foreach (var mesh in glyphMeshes) SafeDestroy(mesh);
-            SafeDestroy(myText);
-            myText = null;
-            objToSpawn = new GameObject[0];
-        }
-
-        /// <summary>
-        /// Samples every spline into a polygon and classifies it by nesting depth: a contour inside an odd number
-        /// of other contours is a hole. This does not depend on contour order or on the font's winding convention
-        /// (some fonts list holes before the outline, which used to fill holes in e.g. Helvetica "B" and "8").
-        /// Outlines are oriented counter-clockwise and holes clockwise, as the triangulator expects.
-        /// </summary>
-        private List<Contour> BuildContours(SplineContainer container)
-        {
-            var contours = new List<Contour>();
-            foreach (var spline in container.Splines)
-            {
-                // Some fonts emit single-knot "contours"; they enclose nothing.
-                if (spline.Count < 2) continue;
-
-                var points = SampleSpline(spline);
-                var area = SignedArea(points);
-                if (points.Count < 3 || Mathf.Abs(area) <= float.Epsilon) continue;
-
-                contours.Add(new Contour { spline = spline, points = points, signedArea = area });
-            }
-
-            for (int i = 0; i < contours.Count; i++)
-            {
-                int depth = 0;
-                for (int j = 0; j < contours.Count; j++)
-                {
-                    if (i != j && IsPointInsidePolygon(contours[i].points[0], contours[j].points)) depth++;
-                }
-                contours[i].isHole = depth % 2 == 1;
-            }
-
-            // A hole belongs to the smallest outline that contains it.
-            for (int i = 0; i < contours.Count; i++)
-            {
-                if (!contours[i].isHole) continue;
-
-                float bestArea = float.MaxValue;
-                for (int j = 0; j < contours.Count; j++)
-                {
-                    if (contours[j].isHole) continue;
-                    float area = Mathf.Abs(contours[j].signedArea);
-                    if (area < bestArea && IsPointInsidePolygon(contours[i].points[0], contours[j].points))
-                    {
-                        bestArea = area;
-                        contours[i].parent = j;
-                    }
-                }
-            }
-
-            foreach (var contour in contours)
-            {
-                bool counterClockwise = contour.signedArea > 0f;
-                if (counterClockwise == contour.isHole)
-                {
-                    ReverseSpline(contour.spline);
-                    contour.points = SampleSpline(contour.spline);
-                    contour.signedArea = SignedArea(contour.points);
-                }
-            }
-
-            return contours;
-        }
-
-        /// <summary>Flattens a spline: straight segments keep their knot, curved segments get m_CurveSegments points.</summary>
-        private List<Vector3> SampleSpline(Spline spline)
-        {
-            int knotCount = spline.Count;
-            int segments = Mathf.Max(1, m_CurveSegments);
-            var points = new List<Vector3>(knotCount * segments);
-
-            for (int k = 0; k < knotCount; k++)
-            {
-                var knot = spline[k];
-                var next = spline[TriangulationUtility.GetIndex(knotCount, k + 1)];
-
-                bool isCurve = !knot.TangentOut.Equals(float3.zero) || !next.TangentIn.Equals(float3.zero);
-                if (isCurve)
-                {
-                    var curve = new BezierCurve(knot, next);
-                    for (int w = 0; w < segments; w++)
-                    {
-                        float t = (float)w / segments;
-                        points.Add(CurveUtility.EvaluatePosition(curve, t));
-                    }
-                }
-                else
-                {
-                    points.Add(knot.Position);
-                }
-            }
-            return points;
-        }
-
-        /// <summary>Shoelace area on the XZ plane, treating (x, z) as 2D (x, y). Positive means counter-clockwise.</summary>
-        private static float SignedArea(List<Vector3> points)
-        {
-            double area = 0;
-            for (int i = 0, j = points.Count - 1; i < points.Count; j = i++)
-            {
-                area += (double)points[j].x * points[i].z - (double)points[i].x * points[j].z;
-            }
-            return (float)(area * 0.5);
-        }
-
-        private static bool IsPointInsidePolygon(Vector3 point, List<Vector3> polygon)
-        {
-            bool inside = false;
-            for (int i = 0, j = polygon.Count - 1; i < polygon.Count; j = i++)
-            {
-                var a = polygon[i];
-                var b = polygon[j];
-                if ((a.z > point.z) != (b.z > point.z) &&
-                    point.x < (b.x - a.x) * (point.z - a.z) / (b.z - a.z) + a.x)
-                {
-                    inside = !inside;
-                }
-            }
-            return inside;
-        }
-
-        private static void ReverseSpline(Spline spline)
-        {
-            int count = spline.Count;
-            var reversed = new BezierKnot[count];
-            for (int z = 0; z < count; z++)
-            {
-                var source = spline[count - 1 - z];
-                reversed[z] = new BezierKnot(source.Position, source.TangentOut, source.TangentIn, quaternion.identity);
-            }
-            for (int z = 0; z < count; z++)
-            {
-                spline[z] = reversed[z];
-            }
-        }
-
-        // UVs are measured in em units, so a texture tiles the same way at every text size.
-        private float UVScale => Mathf.Abs(m_Size) > 1e-6f ? 1f / m_Size : 1f;
-
-        /// <summary>Side walls of one contour: a quad per edge, with its own vertices so edges stay sharp.</summary>
-        private Mesh BuildWalls(List<Vector3> points, float height)
-        {
-            int n = points.Count;
-            var up = new Vector3(0f, height, 0f);
-            float uvScale = UVScale;
-
-            var verts = new Vector3[n * 4];
-            var uvs = new Vector2[n * 4];
-            var tris = new int[n * 6];
-
-            float distance = 0f;
-            for (int k = 0; k < n; k++)
-            {
-                var a = points[k];
-                var b = points[TriangulationUtility.GetIndex(n, k + 1)];
-                float nextDistance = distance + Vector3.Distance(a, b);
-
-                int index = k * 2;
-                verts[index] = a;
-                verts[index + 1] = b;
-                verts[index + 2 * n] = a + up;
-                verts[index + 1 + 2 * n] = b + up;
-
-                // U runs along the outline, V up the extrusion.
-                uvs[index] = new Vector2(distance * uvScale, 0f);
-                uvs[index + 1] = new Vector2(nextDistance * uvScale, 0f);
-                uvs[index + 2 * n] = new Vector2(distance * uvScale, height * uvScale);
-                uvs[index + 1 + 2 * n] = new Vector2(nextDistance * uvScale, height * uvScale);
-
-                int t = k * 6;
-                tris[t + 0] = index;
-                tris[t + 1] = index + 2 * n;
-                tris[t + 2] = index + 2 * n + 1;
-                tris[t + 3] = index;
-                tris[t + 4] = index + 2 * n + 1;
-                tris[t + 5] = index + 1;
-
-                distance = nextDistance;
-            }
-
-            var mesh = new Mesh { vertices = verts, uv = uvs, triangles = tris };
-            mesh.RecalculateNormals();
-            return mesh;
-        }
-
-        /// <summary>Triangulates one outline with its holes into a top cap (at y = height) and a bottom cap (y = 0).</summary>
-        private void BuildCaps(Contour outline, List<Contour> holes, float height, out Mesh top, out Mesh bottom)
-        {
-            List<Vector2> hullPoints2D = outline.points.Select(p => p.ToVector2()).ToList();
-
-            var allHolePoints2D = new HashSet<List<Vector2>>();
-            foreach (var hole in holes)
-            {
-                allHolePoints2D.Add(hole.points.Select(p => p.ToVector2()).ToList());
-            }
-
-            //Normalize to range 0-1, using all points including the holes
-            var allPoints = new List<Vector2>(hullPoints2D);
-            foreach (var hole in allHolePoints2D) allPoints.AddRange(hole);
-
-            var normalizer = new Normalizer2(allPoints);
-            var hullNormalized = normalizer.Normalize(hullPoints2D);
-            var holesNormalized = new HashSet<List<Vector2>>();
-            foreach (var hole in allHolePoints2D) holesNormalized.Add(normalizer.Normalize(hole));
-
-            //Constrained delaunay, then back to glyph space
-            HalfEdgeData2 triangleDataNormalized = Delaunay.ConstrainedBySloan(null, hullNormalized, holesNormalized, shouldRemoveTriangles: true, new HalfEdgeData2());
-            HalfEdgeData2 triangleData = normalizer.UnNormalize(triangleDataNormalized);
-            HashSet<Triangle2> triangles2D = HelpMethods.OrientTrianglesClockwise(TransformBetweenDataStructures.HalfEdge2ToTriangle2(triangleData));
-
-            var triangles3D = new HashSet<Triangle3>();
-            foreach (Triangle2 t in triangles2D)
-            {
-                triangles3D.Add(new Triangle3(t.p1.ToVector3_Yis3D(), t.p2.ToVector3_Yis3D(), t.p3.ToVector3_Yis3D()));
-            }
-
-            Mesh front = TransformBetweenDataStructures.Triangle3ToCompressedMesh(triangles3D);
-            var frontVertices = front.vertices;
-            var frontTriangles = front.triangles;
-            SafeDestroy(front);
-
-            float uvScale = UVScale;
-            var up = new Vector3(0f, height, 0f);
-            var verticesTop = new Vector3[frontVertices.Length];
-            var verticesBottom = new Vector3[frontVertices.Length];
-            var uvs = new Vector2[frontVertices.Length];
-            for (int k = 0; k < frontVertices.Length; k++)
-            {
-                verticesBottom[k] = frontVertices[k];
-                verticesTop[k] = frontVertices[k] + up;
-                uvs[k] = new Vector2(frontVertices[k].x, frontVertices[k].z) * uvScale; // planar mapping, em units
-            }
-
-            var trianglesBottom = new int[frontTriangles.Length];
-            for (int k = 0; k < frontTriangles.Length; k += 3)
-            {
-                trianglesBottom[k + 0] = frontTriangles[k + 0];
-                trianglesBottom[k + 1] = frontTriangles[k + 2];
-                trianglesBottom[k + 2] = frontTriangles[k + 1];
-            }
-
-            top = new Mesh { vertices = verticesTop, uv = uvs, triangles = frontTriangles };
-            top.RecalculateNormals();
-
-            bottom = new Mesh { vertices = verticesBottom, uv = uvs, triangles = trianglesBottom };
-            bottom.RecalculateNormals();
-        }
-
-        /// <summary>Merges the parts into one mesh with normals and tangents, and frees the temporary parts.</summary>
-        private static Mesh Combine(List<Mesh> parts, string name, bool recalculateNormals)
-        {
-            var instances = new CombineInstance[parts.Count];
-            int vertexCount = 0;
-            for (int k = 0; k < parts.Count; k++)
-            {
-                instances[k].mesh = parts[k];
-                instances[k].transform = Matrix4x4.identity;
-                vertexCount += parts[k].vertexCount;
-            }
-
-            var combined = new Mesh { name = name };
-            if (vertexCount > 65535)
-            {
-                combined.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
-            }
-            combined.CombineMeshes(instances, true);
-            if (recalculateNormals)
-            {
-                combined.RecalculateNormals();
-            }
-            combined.RecalculateTangents();
-
-            foreach (var part in parts) SafeDestroy(part);
-            return combined;
+            if (obj == null) return;
+            if (Application.isPlaying) Destroy(obj);
+            else DestroyImmediate(obj);
         }
     }
 }

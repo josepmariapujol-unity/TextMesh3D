@@ -32,21 +32,21 @@ namespace Softgraph.TextMesh3D.Tests
 
         public static IEnumerable<TestCaseData> Cases()
         {
-            yield return Case("Mesh_HelloWorld", "Hello World", TextMesh3DContainer.Enum.Mesh);
-            yield return Case("Mesh_Holes", "ABOabdeg8", TextMesh3DContainer.Enum.Mesh);
-            yield return Case("Mesh_MultiContour", "i?%&@", TextMesh3DContainer.Enum.Mesh);
-            yield return Case("Mesh_Size2_Extrude5", "Rq", TextMesh3DContainer.Enum.Mesh, extrusion: 5f, size: 2f * k_Size);
-            yield return Case("Surface_Mixed", "AaBb 12", TextMesh3DContainer.Enum.Surface);
-            yield return Case("Spline_Mixed", "AaBb gR", TextMesh3DContainer.Enum.Spline);
-            yield return Case("Spline_Spacing", "WAVE", TextMesh3DContainer.Enum.Spline, spacing: 1.5f);
-            yield return Case("Spline_NarrowGlyphs", "il1 jt", TextMesh3DContainer.Enum.Spline);
+            yield return Case("Mesh_HelloWorld", "Hello World", TextMesh3DContainer.OutputMode.Mesh);
+            yield return Case("Mesh_Holes", "ABOabdeg8", TextMesh3DContainer.OutputMode.Mesh);
+            yield return Case("Mesh_MultiContour", "i?%&@", TextMesh3DContainer.OutputMode.Mesh);
+            yield return Case("Mesh_Size2_Extrude5", "Rq", TextMesh3DContainer.OutputMode.Mesh, extrusion: 5f, size: 2f * k_Size);
+            yield return Case("Surface_Mixed", "AaBb 12", TextMesh3DContainer.OutputMode.Surface);
+            yield return Case("Spline_Mixed", "AaBb gR", TextMesh3DContainer.OutputMode.Spline);
+            yield return Case("Spline_Spacing", "WAVE", TextMesh3DContainer.OutputMode.Spline, spacing: 1.5f);
+            yield return Case("Spline_NarrowGlyphs", "il1 jt", TextMesh3DContainer.OutputMode.Spline);
         }
 
-        static TestCaseData Case(string name, string text, TextMesh3DContainer.Enum mode, float extrusion = 1f, float size = k_Size, float spacing = 0f) =>
+        static TestCaseData Case(string name, string text, TextMesh3DContainer.OutputMode mode, float extrusion = 1f, float size = k_Size, float spacing = 0f) =>
             new TestCaseData(name, text, mode, extrusion, size, spacing).SetName("Snapshot_" + name);
 
         [TestCaseSource(nameof(Cases))]
-        public void MatchesBaseline(string name, string text, TextMesh3DContainer.Enum mode, float extrusion, float size, float spacing)
+        public void MatchesBaseline(string name, string text, TextMesh3DContainer.OutputMode mode, float extrusion, float size, float spacing)
         {
             var container = CreateContainer(text, mode, extrusion, size, spacing);
             string received;
@@ -83,7 +83,7 @@ namespace Softgraph.TextMesh3D.Tests
 
         // ---------- Snapshot format: one line per glyph, values rounded to stable precision ----------
 
-        static string Describe(List<Transform> glyphs, TextMesh3DContainer.Enum mode)
+        static string Describe(List<Transform> glyphs, TextMesh3DContainer.OutputMode mode)
         {
             var sb = new StringBuilder();
             sb.AppendLine($"mode={mode} glyphs={glyphs.Count}");
@@ -91,7 +91,7 @@ namespace Softgraph.TextMesh3D.Tests
             {
                 sb.Append($"{g.name} | pos={F(g.localPosition)}");
 
-                if (mode == TextMesh3DContainer.Enum.Spline)
+                if (mode == TextMesh3DContainer.OutputMode.Spline)
                 {
                     var sc = GetSplines(g);
                     var knots = new List<string>();

@@ -34,7 +34,7 @@ namespace Softgraph.TextMesh3D.Tests
 
         public static TextMesh3DContainer CreateContainer(
             string text,
-            TextMesh3DContainer.Enum mode,
+            TextMesh3DContainer.OutputMode mode,
             float extrusion = 1f,
             float size = 1f,
             float spacing = 0f,
@@ -43,25 +43,25 @@ namespace Softgraph.TextMesh3D.Tests
         {
             var go = new GameObject("TextMesh3D Test");
             var container = go.AddComponent<TextMesh3DContainer>();
-            container.m_CurveSegments = curveSegments;
-            container.m_Text = text;
-            container.m_Font = font != null ? font : LoadRoboto();
-            container.m_Output = mode;
-            container.m_Extrusion = extrusion;
-            container.m_Size = size;
-            container.m_Spacing = spacing;
+            container.CurveSegments = curveSegments;
+            container.Text = text;
+            container.Font = font != null ? font : LoadRoboto();
+            container.Output = mode;
+            container.Extrusion = extrusion;
+            container.Size = size;
+            container.Spacing = spacing;
             return container;
         }
 
         /// <summary>Generates and returns the glyph objects (children of the generated root), in text order.</summary>
         public static List<Transform> Generate(TextMesh3DContainer container)
         {
-            container.Function();
+            container.Generate();
             Assert.AreEqual(1, container.transform.childCount, "Expected exactly one generated root under the container.");
             var root = container.transform.GetChild(0);
             var glyphs = new List<Transform>();
             foreach (Transform child in root) glyphs.Add(child);
-            Assert.AreEqual(container.m_Text.Length, glyphs.Count, "Expected one glyph object per character.");
+            Assert.AreEqual(container.Text.Length, glyphs.Count, "Expected one glyph object per character.");
             return glyphs;
         }
 

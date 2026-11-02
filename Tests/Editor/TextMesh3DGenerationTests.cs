@@ -20,7 +20,7 @@ namespace Softgraph.TextMesh3D.Tests
 
         readonly List<TextMesh3DContainer> m_Created = new List<TextMesh3DContainer>();
 
-        TextMesh3DContainer Create(string text, TextMesh3DContainer.Enum mode, float extrusion = 1f, float size = 1f, float spacing = 0f, Font font = null, int curveSegments = 3)
+        TextMesh3DContainer Create(string text, TextMesh3DContainer.OutputMode mode, float extrusion = 1f, float size = 1f, float spacing = 0f, Font font = null, int curveSegments = 3)
         {
             var c = CreateContainer(text, mode, extrusion, size, spacing, font, curveSegments);
             m_Created.Add(c);
@@ -40,7 +40,7 @@ namespace Softgraph.TextMesh3D.Tests
         public void Mesh_IsValidClosedExtrusion(string glyph)
         {
             const float extrusion = 2f;
-            var glyphs = Generate(Create(glyph, TextMesh3DContainer.Enum.Mesh, extrusion));
+            var glyphs = Generate(Create(glyph, TextMesh3DContainer.OutputMode.Mesh, extrusion));
             var mesh = GetMesh(glyphs[0]);
 
             AssertValidMesh(mesh);
@@ -58,8 +58,8 @@ namespace Softgraph.TextMesh3D.Tests
         [Test]
         public void Mesh_ExtrusionScalesOnlyHeight()
         {
-            var low = GetMesh(Generate(Create("B", TextMesh3DContainer.Enum.Mesh, extrusion: 1f))[0]);
-            var high = GetMesh(Generate(Create("B", TextMesh3DContainer.Enum.Mesh, extrusion: 3f))[0]);
+            var low = GetMesh(Generate(Create("B", TextMesh3DContainer.OutputMode.Mesh, extrusion: 1f))[0]);
+            var high = GetMesh(Generate(Create("B", TextMesh3DContainer.OutputMode.Mesh, extrusion: 3f))[0]);
 
             Assert.AreEqual(low.bounds.size.x, high.bounds.size.x, k_Eps);
             Assert.AreEqual(low.bounds.size.z, high.bounds.size.z, k_Eps);
@@ -76,7 +76,7 @@ namespace Softgraph.TextMesh3D.Tests
         [TestCaseSource(nameof(k_Glyphs))]
         public void Surface_IsFlatAndNonEmpty(string glyph)
         {
-            var glyphs = Generate(Create(glyph, TextMesh3DContainer.Enum.Surface));
+            var glyphs = Generate(Create(glyph, TextMesh3DContainer.OutputMode.Surface));
             var mesh = GetMesh(glyphs[0]);
 
             AssertValidMesh(mesh);
@@ -90,8 +90,8 @@ namespace Softgraph.TextMesh3D.Tests
         [Test]
         public void Surface_AreaMatchesMeshCap()
         {
-            var surface = GetMesh(Generate(Create("B", TextMesh3DContainer.Enum.Surface))[0]);
-            var solid = GetMesh(Generate(Create("B", TextMesh3DContainer.Enum.Mesh))[0]);
+            var surface = GetMesh(Generate(Create("B", TextMesh3DContainer.OutputMode.Surface))[0]);
+            var solid = GetMesh(Generate(Create("B", TextMesh3DContainer.OutputMode.Mesh))[0]);
 
             MeasureAreas(surface, out var surfaceUp, out _, out _);
             MeasureAreas(solid, out var solidUp, out _, out _);
@@ -103,7 +103,7 @@ namespace Softgraph.TextMesh3D.Tests
         [TestCaseSource(nameof(k_Glyphs))]
         public void Spline_ContoursAreClosedAndFlat(string glyph)
         {
-            var glyphs = Generate(Create(glyph, TextMesh3DContainer.Enum.Spline));
+            var glyphs = Generate(Create(glyph, TextMesh3DContainer.OutputMode.Spline));
             var splines = GetSplines(glyphs[0]);
 
             Assert.IsNotNull(splines);
@@ -122,7 +122,7 @@ namespace Softgraph.TextMesh3D.Tests
         [Test]
         public void Layout_GlyphsAdvanceLeftToRight()
         {
-            var glyphs = Generate(Create("ABC D", TextMesh3DContainer.Enum.Spline));
+            var glyphs = Generate(Create("ABC D", TextMesh3DContainer.OutputMode.Spline));
             for (int i = 1; i < glyphs.Count; i++)
                 Assert.Greater(glyphs[i].localPosition.x, glyphs[i - 1].localPosition.x, $"Glyph {i} is not right of glyph {i - 1}");
         }
@@ -130,7 +130,7 @@ namespace Softgraph.TextMesh3D.Tests
         [Test]
         public void Layout_SpacesHaveNoGeometry()
         {
-            var glyphs = Generate(Create("A B", TextMesh3DContainer.Enum.Mesh));
+            var glyphs = Generate(Create("A B", TextMesh3DContainer.OutputMode.Mesh));
             Assert.IsTrue(IsSpace(glyphs[1]));
             Assert.IsNull(GetMesh(glyphs[1]));
         }
@@ -139,8 +139,8 @@ namespace Softgraph.TextMesh3D.Tests
         public void Layout_SpacingAddsConstantOffsetPerGlyph()
         {
             const float spacing = 2.5f;
-            var tight = Generate(Create("AVA", TextMesh3DContainer.Enum.Spline));
-            var loose = Generate(Create("AVA", TextMesh3DContainer.Enum.Spline, spacing: spacing));
+            var tight = Generate(Create("AVA", TextMesh3DContainer.OutputMode.Spline));
+            var loose = Generate(Create("AVA", TextMesh3DContainer.OutputMode.Spline, spacing: spacing));
 
             for (int i = 0; i < tight.Count; i++)
                 Assert.AreEqual(tight[i].localPosition.x + i * spacing, loose[i].localPosition.x, k_Eps);
@@ -149,8 +149,8 @@ namespace Softgraph.TextMesh3D.Tests
         [Test]
         public void Layout_SizeScalesUniformly()
         {
-            var small = Generate(Create("AB", TextMesh3DContainer.Enum.Surface, size: 1f));
-            var large = Generate(Create("AB", TextMesh3DContainer.Enum.Surface, size: 2f));
+            var small = Generate(Create("AB", TextMesh3DContainer.OutputMode.Surface, size: 1f));
+            var large = Generate(Create("AB", TextMesh3DContainer.OutputMode.Surface, size: 2f));
 
             Assert.AreEqual(2f * small[1].localPosition.x, large[1].localPosition.x, k_Eps);
             var s = GetMesh(small[0]).bounds.size;
@@ -171,7 +171,7 @@ namespace Softgraph.TextMesh3D.Tests
             const float size = 3f;
             var path = FontPath(fontFile);
             var typeface = LoadTypeface(path);
-            var glyphs = Generate(Create(text, TextMesh3DContainer.Enum.Spline, size: size, font: LoadFont(path)));
+            var glyphs = Generate(Create(text, TextMesh3DContainer.OutputMode.Spline, size: size, font: LoadFont(path)));
 
             float scale = size / typeface.UnitsPerEm;
             float expectedX = 0f;
@@ -188,7 +188,7 @@ namespace Softgraph.TextMesh3D.Tests
             const float size = 1f;
             var path = FontPath(fontFile);
             var typeface = LoadTypeface(path);
-            var mesh = GetMesh(Generate(Create("H", TextMesh3DContainer.Enum.Surface, size: size, font: LoadFont(path)))[0]);
+            var mesh = GetMesh(Generate(Create("H", TextMesh3DContainer.OutputMode.Surface, size: size, font: LoadFont(path)))[0]);
 
             // Cap height in Unity units must equal the font's cap height as a fraction of the em.
             float capHeightEm = typeface.GetGlyph(typeface.GetGlyphIndex('H')).Bounds.YMax / (float)typeface.UnitsPerEm;
@@ -216,7 +216,7 @@ namespace Softgraph.TextMesh3D.Tests
         [TestCaseSource(nameof(AllFontGlyphs))]
         public void Surface_CoversGlyphOutline(string fontFile, string glyph)
         {
-            var mesh = GetMesh(Generate(Create(glyph, TextMesh3DContainer.Enum.Surface, size: 1f, font: LoadFont(FontPath(fontFile))))[0]);
+            var mesh = GetMesh(Generate(Create(glyph, TextMesh3DContainer.OutputMode.Surface, size: 1f, font: LoadFont(FontPath(fontFile))))[0]);
             AssertValidMesh(mesh);
 
             MeasureAreas(mesh, out var up, out var down, out _);
@@ -252,7 +252,7 @@ namespace Softgraph.TextMesh3D.Tests
         [TestCase("Arial.ttf", "%", 1)]
         public void Surface_HasCorrectNumberOfHoles(string fontFile, string glyph, int outlinesMinusHoles)
         {
-            var mesh = GetMesh(Generate(Create(glyph, TextMesh3DContainer.Enum.Surface, font: LoadFont(FontPath(fontFile))))[0]);
+            var mesh = GetMesh(Generate(Create(glyph, TextMesh3DContainer.OutputMode.Surface, font: LoadFont(FontPath(fontFile))))[0]);
             Assert.AreEqual(outlinesMinusHoles, UpFacingEulerCharacteristic(mesh),
                 "Euler characteristic of the cap (outlines - holes) is wrong: a hole was filled or assigned to the wrong outline");
         }
@@ -261,8 +261,8 @@ namespace Softgraph.TextMesh3D.Tests
         [TestCase("%")]
         public void Mesh_TopCapHasCorrectNumberOfHoles(string glyph)
         {
-            var surface = GetMesh(Generate(Create(glyph, TextMesh3DContainer.Enum.Surface, font: LoadFont(FontPath("Helvetica.ttf"))))[0]);
-            var solid = GetMesh(Generate(Create(glyph, TextMesh3DContainer.Enum.Mesh, font: LoadFont(FontPath("Helvetica.ttf"))))[0]);
+            var surface = GetMesh(Generate(Create(glyph, TextMesh3DContainer.OutputMode.Surface, font: LoadFont(FontPath("Helvetica.ttf"))))[0]);
+            var solid = GetMesh(Generate(Create(glyph, TextMesh3DContainer.OutputMode.Mesh, font: LoadFont(FontPath("Helvetica.ttf"))))[0]);
 
             // Up-facing triangles of the solid are just the top cap, so it must match the surface.
             Assert.AreEqual(UpFacingEulerCharacteristic(surface), UpFacingEulerCharacteristic(solid));
@@ -270,9 +270,9 @@ namespace Softgraph.TextMesh3D.Tests
 
         // ---------- UVs / tangents ----------
 
-        [TestCase(TextMesh3DContainer.Enum.Mesh)]
-        [TestCase(TextMesh3DContainer.Enum.Surface)]
-        public void Mesh_HasUVsNormalsAndTangents(TextMesh3DContainer.Enum mode)
+        [TestCase(TextMesh3DContainer.OutputMode.Mesh)]
+        [TestCase(TextMesh3DContainer.OutputMode.Surface)]
+        public void Mesh_HasUVsNormalsAndTangents(TextMesh3DContainer.OutputMode mode)
         {
             var mesh = GetMesh(Generate(Create("Bg", mode, extrusion: 0.5f, size: 2f))[0]);
 
@@ -286,8 +286,8 @@ namespace Softgraph.TextMesh3D.Tests
         [Test]
         public void UVs_AreInEmUnits_SoTextureScaleIsIndependentOfSize()
         {
-            var small = GetMesh(Generate(Create("H", TextMesh3DContainer.Enum.Surface, size: 1f))[0]);
-            var large = GetMesh(Generate(Create("H", TextMesh3DContainer.Enum.Surface, size: 4f))[0]);
+            var small = GetMesh(Generate(Create("H", TextMesh3DContainer.OutputMode.Surface, size: 1f))[0]);
+            var large = GetMesh(Generate(Create("H", TextMesh3DContainer.OutputMode.Surface, size: 4f))[0]);
 
             var smallUv = small.uv;
             var largeUv = large.uv;
@@ -303,9 +303,9 @@ namespace Softgraph.TextMesh3D.Tests
         [Test]
         public void CurveSegments_IncreaseResolutionAndConvergeOnTheTrueShape()
         {
-            var coarse = GetMesh(Generate(Create("O", TextMesh3DContainer.Enum.Surface, size: 10f, curveSegments: 1))[0]);
-            var normal = GetMesh(Generate(Create("O", TextMesh3DContainer.Enum.Surface, size: 10f, curveSegments: 3))[0]);
-            var fine = GetMesh(Generate(Create("O", TextMesh3DContainer.Enum.Surface, size: 10f, curveSegments: 12))[0]);
+            var coarse = GetMesh(Generate(Create("O", TextMesh3DContainer.OutputMode.Surface, size: 10f, curveSegments: 1))[0]);
+            var normal = GetMesh(Generate(Create("O", TextMesh3DContainer.OutputMode.Surface, size: 10f, curveSegments: 3))[0]);
+            var fine = GetMesh(Generate(Create("O", TextMesh3DContainer.OutputMode.Surface, size: 10f, curveSegments: 12))[0]);
 
             Assert.Less(coarse.vertexCount, normal.vertexCount);
             Assert.Less(normal.vertexCount, fine.vertexCount);
@@ -324,7 +324,7 @@ namespace Softgraph.TextMesh3D.Tests
         {
             const float size = 2f;
             var typeface = LoadTypeface(RobotoPath);
-            var glyphs = Generate(Create("A B", TextMesh3DContainer.Enum.Spline, size: size));
+            var glyphs = Generate(Create("A B", TextMesh3DContainer.OutputMode.Spline, size: size));
 
             float scale = size / typeface.UnitsPerEm;
             float spaceAdvance = typeface.GetAdvanceWidthFromGlyphIndex(typeface.GetGlyphIndex(' ')) * scale;
@@ -336,7 +336,7 @@ namespace Softgraph.TextMesh3D.Tests
         public void Layout_NarrowGlyphsAreNotOverlapping()
         {
             // Pen advance must be at least the ink width, plus right side bearing, for "i" and "l".
-            var glyphs = Generate(Create("ilil", TextMesh3DContainer.Enum.Surface, size: 1f));
+            var glyphs = Generate(Create("ilil", TextMesh3DContainer.OutputMode.Surface, size: 1f));
             for (int i = 0; i + 1 < glyphs.Count; i++)
             {
                 var inkRight = glyphs[i].localPosition.x + GetMesh(glyphs[i]).bounds.max.x;
@@ -350,9 +350,9 @@ namespace Softgraph.TextMesh3D.Tests
         [Test]
         public void Regenerate_ReplacesPreviousOutput()
         {
-            var container = Create("Hi", TextMesh3DContainer.Enum.Mesh);
-            container.Function();
-            container.m_Text = "Hello";
+            var container = Create("Hi", TextMesh3DContainer.OutputMode.Mesh);
+            container.Generate();
+            container.Text = "Hello";
             var glyphs = Generate(container); // asserts a single generated root
 
             Assert.AreEqual(5, glyphs.Count);
@@ -363,13 +363,13 @@ namespace Softgraph.TextMesh3D.Tests
         [Test]
         public void Regenerate_CanBeUndone()
         {
-            var container = Create("Hi", TextMesh3DContainer.Enum.Mesh);
+            var container = Create("Hi", TextMesh3DContainer.OutputMode.Mesh);
             Undo.IncrementCurrentGroup();
-            container.Function();
+            container.Generate();
 
             Undo.IncrementCurrentGroup();
-            container.m_Text = "Hello";
-            container.Function();
+            container.Text = "Hello";
+            container.Generate();
             Assert.AreEqual(5, container.transform.GetChild(0).childCount);
 
             Undo.PerformUndo();
@@ -384,10 +384,10 @@ namespace Softgraph.TextMesh3D.Tests
         [Test]
         public void Generate_DoesNotLeakTemporaryMeshes()
         {
-            var container = Create("AB", TextMesh3DContainer.Enum.Mesh);
+            var container = Create("AB", TextMesh3DContainer.OutputMode.Mesh);
             int before = Resources.FindObjectsOfTypeAll<Mesh>().Length;
 
-            container.Function();
+            container.Generate();
 
             int created = Resources.FindObjectsOfTypeAll<Mesh>().Length - before;
             Assert.AreEqual(2, created, "Expected exactly one mesh per glyph; temporary wall/cap meshes must be destroyed");
@@ -398,8 +398,8 @@ namespace Softgraph.TextMesh3D.Tests
         {
             var material = AssetDatabase.LoadAssetAtPath<Material>(PackageRoot + "/Editor/Resources/Materials/FontMaterial.mat");
             Assert.IsNotNull(material);
-            var container = Create("A", TextMesh3DContainer.Enum.Mesh);
-            container.m_Material = material;
+            var container = Create("A", TextMesh3DContainer.OutputMode.Mesh);
+            container.Material = material;
 
             var glyphs = Generate(container);
 
@@ -408,9 +408,9 @@ namespace Softgraph.TextMesh3D.Tests
 
         // ---------- Group Output ----------
 
-        [TestCase(TextMesh3DContainer.Enum.Mesh)]
-        [TestCase(TextMesh3DContainer.Enum.Surface)]
-        public void GroupOutput_MergesAllGlyphsIntoRootMesh(TextMesh3DContainer.Enum mode)
+        [TestCase(TextMesh3DContainer.OutputMode.Mesh)]
+        [TestCase(TextMesh3DContainer.OutputMode.Surface)]
+        public void GroupOutput_MergesAllGlyphsIntoRootMesh(TextMesh3DContainer.OutputMode mode)
         {
             const string text = "AB C";
             var separate = Generate(Create(text, mode));
@@ -425,8 +425,8 @@ namespace Softgraph.TextMesh3D.Tests
             }
 
             var grouped = Create(text, mode);
-            grouped.m_GroupOutput = true;
-            grouped.Function();
+            grouped.GroupOutput = true;
+            grouped.Generate();
 
             Assert.AreEqual(0, grouped.transform.childCount, "Grouped output should not leave per-glyph objects");
             var mesh = grouped.GetComponent<MeshFilter>().sharedMesh;
@@ -440,12 +440,12 @@ namespace Softgraph.TextMesh3D.Tests
         [Test]
         public void GroupOutput_TurnedOff_RestoresPerGlyphObjectsAndClearsRootMesh()
         {
-            var container = Create("AB", TextMesh3DContainer.Enum.Mesh);
-            container.m_GroupOutput = true;
-            container.Function();
+            var container = Create("AB", TextMesh3DContainer.OutputMode.Mesh);
+            container.GroupOutput = true;
+            container.Generate();
             Assert.IsNotNull(container.GetComponent<MeshFilter>().sharedMesh);
 
-            container.m_GroupOutput = false;
+            container.GroupOutput = false;
             var glyphs = Generate(container);
 
             Assert.AreEqual(2, glyphs.Count);
@@ -455,7 +455,7 @@ namespace Softgraph.TextMesh3D.Tests
         [Test]
         public void Generate_CachesFontBytesForPlayerBuilds()
         {
-            var container = Create("A", TextMesh3DContainer.Enum.Spline);
+            var container = Create("A", TextMesh3DContainer.OutputMode.Spline);
             Generate(container);
 
             var so = new SerializedObject(container);

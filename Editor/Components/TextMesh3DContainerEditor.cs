@@ -77,7 +77,7 @@ namespace Softgraph.TextMesh3D.Editor
             {
                 foreach (var t in targets)
                 {
-                    ((TextMesh3DContainer) t).Function();
+                    ((TextMesh3DContainer) t).Generate();
                 }
             }
         }

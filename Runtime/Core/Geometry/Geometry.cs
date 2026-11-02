@@ -64,24 +64,12 @@ namespace Softgraph.TextMesh3D.Runtime
         //
         // Does a point p lie to the left, to the right, or on a vector going from a to b
         //
-        //https://gamedev.stackexchange.com/questions/71328/how-can-i-add-and-subtract-convex-polygons
-        private static float GetPointInRelationToVectorValue(Vector2 a, Vector2 b, Vector2 p)
-        {
-            float x1 = a.x - p.x;
-            float x2 = a.y - p.y;
-            float y1 = b.x - p.x;
-            float y2 = b.y - p.y;
-            float determinant = MathUtility.Det2(x1, x2, y1, y2);
-
-            return determinant;
-        }
-
         //Same as above but we want to figure out if we are on the vector
         //Use this if we might en up on the line, which has a low probability in a game, but may happen in some cases
         //Where is c in relation to a-b
         public static LeftOnRight IsPointLeftOnRightOfVector(Vector2 a, Vector2 b, Vector2 p)
         {
-            //Same determinant as GetPointInRelationToVectorValue, but in double precision
+            //det(a - p, b - p) in double precision
             double x1 = (double)a.x - p.x;
             double x2 = (double)a.y - p.y;
             double y1 = (double)b.x - p.x;

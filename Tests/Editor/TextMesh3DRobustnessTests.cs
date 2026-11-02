@@ -19,7 +19,7 @@ namespace Softgraph.TextMesh3D.Tests
         const float k_Eps = 1e-3f;
         readonly List<TextMesh3DContainer> m_Created = new List<TextMesh3DContainer>();
 
-        TextMesh3DContainer Create(string text, TextMesh3DContainer.Enum mode = TextMesh3DContainer.Enum.Mesh)
+        TextMesh3DContainer Create(string text, TextMesh3DContainer.OutputMode mode = TextMesh3DContainer.OutputMode.Mesh)
         {
             var c = CreateContainer(text, mode);
             m_Created.Add(c);
@@ -41,9 +41,9 @@ namespace Softgraph.TextMesh3D.Tests
             var container = Create("A");
             Generate(container);
 
-            container.m_Font = null;
+            container.Font = null;
             LogAssert.Expect(LogType.Error, new Regex("no font data"));
-            container.Function();
+            container.Generate();
 
             Assert.AreEqual(1, container.transform.childCount, "Previous output should be kept when the font is missing");
         }
@@ -57,9 +57,9 @@ namespace Softgraph.TextMesh3D.Tests
             var container = Create("A");
             Generate(container);
 
-            container.m_Size = size;
+            container.Size = size;
             LogAssert.Expect(LogType.Error, new Regex("Font Size must be greater than 0"));
-            container.Function();
+            container.Generate();
 
             Assert.AreEqual(1, container.transform.childCount);
         }
@@ -69,9 +69,9 @@ namespace Softgraph.TextMesh3D.Tests
         public void InvalidExtrusion_LogsError(float extrusion)
         {
             var container = Create("A");
-            container.m_Extrusion = extrusion;
+            container.Extrusion = extrusion;
             LogAssert.Expect(LogType.Error, new Regex("Extrusion must be 0 or greater"));
-            container.Function();
+            container.Generate();
 
             Assert.AreEqual(0, container.transform.childCount);
         }
@@ -89,7 +89,7 @@ namespace Softgraph.TextMesh3D.Tests
             so.ApplyModifiedPropertiesWithoutUndo();
 
             LogAssert.Expect(LogType.Error, new Regex("could not read font|is not a supported TrueType/OpenType font"));
-            container.Function();
+            container.Generate();
 
             Assert.AreEqual(0, container.transform.childCount);
         }
@@ -101,12 +101,12 @@ namespace Softgraph.TextMesh3D.Tests
         public void EmptyOrNullText_ClearsOutput(string text)
         {
             var container = Create("AB");
-            container.m_GroupOutput = true;
-            container.Function();
+            container.GroupOutput = true;
+            container.Generate();
             Assert.IsNotNull(container.GetComponent<MeshFilter>().sharedMesh);
 
-            container.m_Text = text;
-            container.Function();
+            container.Text = text;
+            container.Generate();
 
             Assert.AreEqual(0, container.transform.childCount);
             Assert.IsNull(container.GetComponent<MeshFilter>().sharedMesh);
@@ -116,7 +116,7 @@ namespace Softgraph.TextMesh3D.Tests
         public void LineBreak_StartsNewLine_TabAdvancesFourSpaces_ControlCharactersAreInvisible()
         {
             const float size = 1f;
-            var glyphs = Generate(Create("A\nB\tC\rD", TextMesh3DContainer.Enum.Mesh));
+            var glyphs = Generate(Create("A\nB\tC\rD", TextMesh3DContainer.OutputMode.Mesh));
             var typeface = LoadTypeface(RobotoPath);
             float scale = size / typeface.UnitsPerEm;
             float Advance(char c) => typeface.GetAdvanceWidthFromGlyphIndex(typeface.GetGlyphIndex(c)) * scale;
@@ -175,10 +175,10 @@ namespace Softgraph.TextMesh3D.Tests
             var container = go.GetComponent<TextMesh3DContainer>();
             m_Created.Add(container);
 
-            Assert.IsNotNull(container.m_Font, "Default font should be assigned");
-            Assert.IsNotNull(container.m_Material, "Default material should be assigned");
+            Assert.IsNotNull(container.Font, "Default font should be assigned");
+            Assert.IsNotNull(container.Material, "Default material should be assigned");
             Assert.AreEqual(1, container.transform.childCount, "Text should be generated right away");
-            Assert.AreEqual(container.m_Text.Length, container.transform.GetChild(0).childCount);
+            Assert.AreEqual(container.Text.Length, container.transform.GetChild(0).childCount);
         }
     }
 }
