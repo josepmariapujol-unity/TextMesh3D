@@ -32,6 +32,43 @@ namespace Softgraph.TextMesh3D.Tests
             Assert.AreEqual(LeftOnRight.On, Geometry.IsPointLeftOnRightOfVector(a, b, new Vector2(0.5f, 0)));
         }
 
+        // Regression: the "on the line" tolerance used to be absolute, so on short edges points that were clearly
+        // to one side were classified as On. Dense outlines (Garamond "H") then triangulated into nothing.
+        [TestCase(1f)]
+        [TestCase(1e-3f)]
+        [TestCase(1e-4f)]
+        public void IsPointLeftOnRightOfVector_IsScaleIndependent(float scale)
+        {
+            var a = new Vector2(0, 0) * scale;
+            var b = new Vector2(1, 0) * scale;
+            Assert.AreEqual(LeftOnRight.Left, Geometry.IsPointLeftOnRightOfVector(a, b, new Vector2(0.5f, 0.1f) * scale));
+            Assert.AreEqual(LeftOnRight.Right, Geometry.IsPointLeftOnRightOfVector(a, b, new Vector2(0.5f, -0.1f) * scale));
+            Assert.AreEqual(LeftOnRight.On, Geometry.IsPointLeftOnRightOfVector(a, b, new Vector2(0.5f, 0f) * scale));
+        }
+
+        // Regression: crossing segments with a small cross product were treated as parallel.
+        [TestCase(1f)]
+        [TestCase(1e-3f)]
+        [TestCase(1e-4f)]
+        public void LineLine_DetectsCrossingOfShortSegments(float scale)
+        {
+            var a = new Edge2(new Vector2(0, 0) * scale, new Vector2(1, 1) * scale);
+            var b = new Edge2(new Vector2(0, 1) * scale, new Vector2(1, 0) * scale);
+            Assert.IsTrue(Intersections.LineLine(a, b, includeEndPoints: false));
+
+            var parallel = new Edge2(new Vector2(0, 0.5f) * scale, new Vector2(1, 1.5f) * scale);
+            Assert.IsFalse(Intersections.LineLine(a, parallel, includeEndPoints: false));
+        }
+
+        [TestCase(1f)]
+        [TestCase(1e-3f)]
+        public void PointCircle_IsScaleIndependent(float scale)
+        {
+            Vector2 a = new Vector2(0, 0) * scale, b = new Vector2(2, 0) * scale, c = new Vector2(0, 2) * scale; // center (1,1), r = 1.414
+            Assert.AreEqual(IntersectionCases.IsInside, Intersections.PointCircle(a, b, c, new Vector2(1, 1.2f) * scale));
+            Assert.AreEqual(IntersectionCases.NoIntersection, Intersections.PointCircle(a, b, c, new Vector2(1, 2.6f) * scale));
+        }
+
         [Test]
         public void CalculateCircleCenter_IsEquidistantFromVertices([Values(false, true)] bool reverseWinding)
         {

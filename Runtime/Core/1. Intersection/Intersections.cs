@@ -13,28 +13,32 @@ namespace Softgraph.TextMesh3D.Runtime
     {
         public static bool LineLine(Edge2 a, Edge2 b, bool includeEndPoints)
         {
-            float epsilon = MathUtility.EPSILON;
+            //Double precision and scale-independent tolerances: with a fixed tolerance on the denominator,
+            //short (but clearly crossing) segments were treated as parallel, so constraint edges of dense
+            //outlines could not be inserted and the whole glyph was removed afterwards.
+            double a1x = a.p1.x, a1y = a.p1.y, a2x = a.p2.x, a2y = a.p2.y;
+            double b1x = b.p1.x, b1y = b.p1.y, b2x = b.p2.x, b2y = b.p2.y;
 
-            Vector2 a1 = a.p1;
-            Vector2 a2 = a.p2;
-            Vector2 b1 = b.p1;
-            Vector2 b2 = b.p2;
+            double denominator = (b2y - b1y) * (a2x - a1x) - (b2x - b1x) * (a2y - a1y);
 
-            float denominator = (b2.y - b1.y) * (a2.x - a1.x) - (b2.x - b1.x) * (a2.y - a1.y);
+            double lengthA = System.Math.Sqrt((a2x - a1x) * (a2x - a1x) + (a2y - a1y) * (a2y - a1y));
+            double lengthB = System.Math.Sqrt((b2x - b1x) * (b2x - b1x) + (b2y - b1y) * (b2y - b1y));
 
-            if (Mathf.Abs(denominator) <= epsilon)
+            if (System.Math.Abs(denominator) <= MathUtility.PARALLEL_RELATIVE_EPSILON * lengthA * lengthB)
                 return false; // Lines are parallel or coincident
 
-            float uA = ((b2.x - b1.x) * (a1.y - b1.y) - (b2.y - b1.y) * (a1.x - b1.x)) / denominator;
-            float uB = ((a2.x - a1.x) * (a1.y - b1.y) - (a2.y - a1.y) * (a1.x - b1.x)) / denominator;
+            double uA = ((b2x - b1x) * (a1y - b1y) - (b2y - b1y) * (a1x - b1x)) / denominator;
+            double uB = ((a2x - a1x) * (a1y - b1y) - (a2y - a1y) * (a1x - b1x)) / denominator;
+
+            double epsilon = MathUtility.SEGMENT_PARAM_EPSILON;
 
             if (includeEndPoints)
             {
-                return (uA >= -epsilon && uA <= 1f + epsilon) && (uB >= -epsilon && uB <= 1f + epsilon);
+                return (uA >= -epsilon && uA <= 1.0 + epsilon) && (uB >= -epsilon && uB <= 1.0 + epsilon);
             }
             else
             {
-                return (uA > epsilon && uA < 1f - epsilon) && (uB > epsilon && uB < 1f - epsilon);
+                return (uA > epsilon && uA < 1.0 - epsilon) && (uB > epsilon && uB < 1.0 - epsilon);
             }
         }
 
@@ -44,7 +48,8 @@ namespace Softgraph.TextMesh3D.Runtime
             float radiusSqr = (a - center).sqrMagnitude;
             float distSqr = (testPoint - center).sqrMagnitude;
 
-            float tolerance = MathUtility.EPSILON * 2f;
+            //Relative to the circle size; a fixed tolerance made every small triangle "on the circle"
+            float tolerance = MathUtility.CIRCLE_RELATIVE_EPSILON * radiusSqr;
 
             if (distSqr < radiusSqr - tolerance)
                 return IntersectionCases.IsInside;

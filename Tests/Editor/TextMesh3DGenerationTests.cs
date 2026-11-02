@@ -198,6 +198,36 @@ namespace Softgraph.TextMesh3D.Tests
             Assert.That(mesh.bounds.max.z, Is.InRange(0.55f * size, 0.85f * size), "Cap height should be ~0.7 em");
         }
 
+        // Every bundled font x a spread of glyphs (straight, curved, holes). Garamond and Baskerville have dense
+        // outlines that used to triangulate into empty meshes.
+        static IEnumerable<TestCaseData> AllFontGlyphs()
+        {
+            var dir = System.IO.Path.GetFullPath(PackageRoot + "/Editor/Resources/Fonts");
+            foreach (var file in System.IO.Directory.GetFiles(dir))
+            {
+                var ext = System.IO.Path.GetExtension(file).ToLowerInvariant();
+                if (ext != ".ttf" && ext != ".otf") continue;
+                var name = System.IO.Path.GetFileName(file);
+                foreach (var ch in "AHOBeg8aRS")
+                    yield return new TestCaseData(name, ch.ToString()).SetName($"Surface_CoversGlyphOutline({name}, {ch})");
+            }
+        }
+
+        [TestCaseSource(nameof(AllFontGlyphs))]
+        public void Surface_CoversGlyphOutline(string fontFile, string glyph)
+        {
+            var mesh = GetMesh(Generate(Create(glyph, TextMesh3DContainer.Enum.Surface, size: 1f, font: LoadFont(FontPath(fontFile))))[0]);
+            AssertValidMesh(mesh);
+
+            MeasureAreas(mesh, out var up, out var down, out _);
+            Assert.Greater(up, 0f, "Glyph triangulated into an empty surface");
+            Assert.AreEqual(up, down, up * 0.01f);
+
+            // The filled area must not exceed the glyph's bounding box (catches triangles leaking outside).
+            var size = mesh.bounds.size;
+            Assert.LessOrEqual(up, size.x * size.z * 1.001f);
+        }
+
         [Test]
         public void Layout_SpaceUsesFontSpaceAdvance()
         {

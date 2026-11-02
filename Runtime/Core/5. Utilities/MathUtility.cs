@@ -12,6 +12,21 @@ namespace Softgraph.TextMesh3D.Runtime
         //But it's better to use our own so we can test different values
         public const float EPSILON = 0.00001f;
 
+        // Scale-independent tolerances for the triangulation predicates. Absolute tolerances on determinants
+        // break down for dense outlines (many short edges), so these are relative to the lengths involved.
+
+        /// <summary>A point is "on" a line if its distance to it is below this fraction of the segment length.</summary>
+        public const double SIDE_RELATIVE_EPSILON = 1e-7;
+
+        /// <summary>Two segments are parallel if |cross(dirA, dirB)| is below this fraction of |A|*|B|.</summary>
+        public const double PARALLEL_RELATIVE_EPSILON = 1e-12;
+
+        /// <summary>Tolerance on the segment parameters (0..1) when intersecting two segments.</summary>
+        public const double SEGMENT_PARAM_EPSILON = 1e-7;
+
+        /// <summary>A point is "on" a circumcircle if |dist² - r²| is below this fraction of r².</summary>
+        public const float CIRCLE_RELATIVE_EPSILON = 1e-6f;
+
         //Clamp list indices
         //Will even work if index is larger/smaller than listSize, so can loop multiple times
         public static int ClampListIndex(int index, int listSize)

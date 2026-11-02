@@ -81,10 +81,19 @@ namespace Softgraph.TextMesh3D.Runtime
         //Where is c in relation to a-b
         public static LeftOnRight IsPointLeftOnRightOfVector(Vector2 a, Vector2 b, Vector2 p)
         {
-            float relationValue = GetPointInRelationToVectorValue(a, b, p);
+            //Same determinant as GetPointInRelationToVectorValue, but in double precision
+            double x1 = (double)a.x - p.x;
+            double x2 = (double)a.y - p.y;
+            double y1 = (double)b.x - p.x;
+            double y2 = (double)b.y - p.y;
+            double relationValue = x1 * y2 - y1 * x2;
 
-            //To avoid floating point precision issues we can add a small value
-            float epsilon = MathUtility.EPSILON;
+            //The determinant equals |a-b| * distance(p, line), so compare against a tolerance proportional to |a-b|.
+            //A fixed tolerance made short edges "swallow" nearby points, which produced inverted triangles
+            //and empty meshes for fonts with dense outlines (e.g. Garamond "H").
+            double dx = (double)b.x - a.x;
+            double dy = (double)b.y - a.y;
+            double epsilon = MathUtility.SIDE_RELATIVE_EPSILON * System.Math.Sqrt(dx * dx + dy * dy);
 
             //To the right
             if (relationValue < -epsilon)
