@@ -38,7 +38,7 @@ namespace Softgraph.TextMesh3D.Runtime
         [SerializeField]
         public float m_Spacing;
 
-        [SerializeField]
+        [SerializeField, Tooltip("Surface/Mesh only: merge all glyphs into one mesh on this object instead of one child object per glyph.")]
         public bool m_GroupOutput;
 
         [SerializeField, Range(1, 32), Tooltip("Points per curved outline segment. Higher gives smoother curves and more triangles.")]
@@ -132,6 +132,19 @@ namespace Softgraph.TextMesh3D.Runtime
 
         public void Function()
         {
+#if UNITY_EDITOR
+            // In edit mode, one Apply is one undo step: it restores the previous output (and grouped mesh).
+            bool recordUndo = !Application.isPlaying;
+            int undoGroup = -1;
+            if (recordUndo)
+            {
+                Undo.SetCurrentGroupName(k_UndoName);
+                undoGroup = Undo.GetCurrentGroup();
+                Undo.RecordObject(this, k_UndoName);
+                if (TryGetComponent<MeshFilter>(out var rootFilter)) Undo.RecordObject(rootFilter, k_UndoName);
+                if (TryGetComponent<MeshRenderer>(out var rootRenderer)) Undo.RecordObject(rootRenderer, k_UndoName);
+            }
+#endif
             switch (m_Output)
             {
                 case Enum.Spline:
@@ -144,6 +157,63 @@ namespace Softgraph.TextMesh3D.Runtime
                     DoMesh();
                     break;
             }
+#if UNITY_EDITOR
+            if (recordUndo)
+            {
+                if (myText) Undo.RegisterCreatedObjectUndo(myText, k_UndoName);
+                Undo.CollapseUndoOperations(undoGroup);
+            }
+#endif
+        }
+
+        private const string k_UndoName = "Generate TextMesh3D";
+
+        /// <summary>
+        /// Removes the previous output: the generated child hierarchy and any grouped mesh on this object.
+        /// In edit mode this goes through Undo, so the meshes are kept for undo/redo (Unity frees unreferenced
+        /// ones when the scene is saved). While playing, the meshes are destroyed so regenerating doesn't leak.
+        /// </summary>
+        private void ClearPreviousOutput()
+        {
+            TryGetComponent<MeshFilter>(out var rootFilter);
+            var rootMesh = rootFilter != null ? rootFilter.sharedMesh : null;
+            bool ownsRootMesh = rootMesh != null && IsGeneratedMesh(rootMesh);
+
+            if (Application.isPlaying)
+            {
+                if (myText)
+                {
+                    foreach (var mf in myText.GetComponentsInChildren<MeshFilter>(true))
+                    {
+                        if (mf.sharedMesh != null && IsGeneratedMesh(mf.sharedMesh)) Destroy(mf.sharedMesh);
+                    }
+                    Destroy(myText);
+                }
+                if (ownsRootMesh) Destroy(rootMesh);
+            }
+#if UNITY_EDITOR
+            else if (myText)
+            {
+                Undo.DestroyObjectImmediate(myText);
+            }
+#endif
+            else if (myText)
+            {
+                DestroyImmediate(myText);
+            }
+
+            myText = null;
+            if (ownsRootMesh) rootFilter.sharedMesh = null;
+        }
+
+        // Only meshes this component created (in memory) may be destroyed; never a mesh asset the user assigned.
+        private static bool IsGeneratedMesh(Mesh mesh)
+        {
+#if UNITY_EDITOR
+            return !EditorUtility.IsPersistent(mesh);
+#else
+            return true;
+#endif
         }
 
         private bool DoSpline()
@@ -152,7 +222,7 @@ namespace Softgraph.TextMesh3D.Runtime
             if (typeface == null) return false;
 
             var fontName = m_Font != null ? m_Font.name : "TextMesh3D";
-            if (myText) SafeDestroy(myText);
+            ClearPreviousOutput();
             myText = new GameObject(fontName);
             myText.transform.SetParent(transform, false);
 
@@ -249,7 +319,8 @@ namespace Softgraph.TextMesh3D.Runtime
 
                 var splineContainer = objToSpawn[i].GetComponent<SplineContainer>();
                 objToSpawn[i].AddComponent<MeshFilter>();
-                objToSpawn[i].AddComponent<MeshRenderer>().material = m_Material;
+                // sharedMaterial: .material would instantiate (and leak) a copy in edit mode
+                objToSpawn[i].AddComponent<MeshRenderer>().sharedMaterial = m_Material;
 
                 var contours = BuildContours(splineContainer);
 
@@ -291,6 +362,56 @@ namespace Softgraph.TextMesh3D.Runtime
 
                 SafeDestroy(splineContainer);
             }
+
+            if (m_GroupOutput)
+            {
+                GroupIntoRootMesh();
+            }
+        }
+
+        /// <summary>
+        /// Group Output: merges every glyph into one mesh on this object's MeshFilter / MeshRenderer and removes
+        /// the per-glyph objects. One object and one draw call for the whole text.
+        /// </summary>
+        private void GroupIntoRootMesh()
+        {
+            var glyphMeshes = new List<Mesh>();
+            var instances = new List<CombineInstance>();
+            int vertexCount = 0;
+
+            for (int i = 0; i < objToSpawn.Length; i++)
+            {
+                var filter = objToSpawn[i] != null ? objToSpawn[i].GetComponent<MeshFilter>() : null;
+                if (filter == null || filter.sharedMesh == null) continue;
+
+                glyphMeshes.Add(filter.sharedMesh);
+                vertexCount += filter.sharedMesh.vertexCount;
+                instances.Add(new CombineInstance
+                {
+                    mesh = filter.sharedMesh,
+                    transform = Matrix4x4.Translate(objToSpawn[i].transform.localPosition),
+                });
+            }
+
+            var grouped = new Mesh { name = m_Text };
+            if (vertexCount > 65535)
+            {
+                grouped.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
+            }
+            grouped.CombineMeshes(instances.ToArray(), true);
+
+            var rootFilter = GetComponent<MeshFilter>();
+            var rootRenderer = GetComponent<MeshRenderer>();
+            if (rootFilter == null) rootFilter = gameObject.AddComponent<MeshFilter>();
+            if (rootRenderer == null) rootRenderer = gameObject.AddComponent<MeshRenderer>();
+            rootFilter.sharedMesh = grouped;
+            rootRenderer.sharedMaterial = m_Material;
+
+            // The per-glyph objects were created in this same call, so they can go without an undo record.
+            foreach (var mesh in glyphMeshes) SafeDestroy(mesh);
+            SafeDestroy(myText);
+            myText = null;
+            objToSpawn = new GameObject[0];
         }
 
         /// <summary>

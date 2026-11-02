@@ -48,5 +48,31 @@ namespace Softgraph.TextMesh3D.Tests
                 Assert.Greater(mf.sharedMesh.vertexCount, 0);
             }
         }
+
+        [UnityTest]
+        public IEnumerator Regenerate_InPlayMode_DoesNotLeakMeshes()
+        {
+            m_Go = new GameObject("TextMesh3D PlayMode Leak Test");
+            var container = m_Go.AddComponent<TextMesh3DContainer>();
+#if UNITY_EDITOR
+            container.m_Font = UnityEditor.AssetDatabase.LoadAssetAtPath<Font>("Packages/com.softgraph.textmesh3d/Editor/Resources/Fonts/Roboto.ttf");
+#endif
+            container.m_Text = "Abc";
+            container.m_Output = TextMesh3DContainer.Enum.Mesh;
+            container.m_Size = 1f;
+            container.m_Extrusion = 1f;
+
+            container.Function();
+            yield return null;
+            int baseline = Resources.FindObjectsOfTypeAll<Mesh>().Length;
+
+            for (int i = 0; i < 5; i++)
+            {
+                container.Function();
+                yield return null; // Destroy() runs at end of frame
+            }
+
+            Assert.AreEqual(baseline, Resources.FindObjectsOfTypeAll<Mesh>().Length, "Regenerating should replace meshes, not accumulate them");
+        }
     }
 }

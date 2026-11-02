@@ -93,9 +93,11 @@ namespace Softgraph.TextMesh3D.Editor
             if (showInfo)
             {
                 EditorGUILayout.PropertyField(m_Spacing, new GUIContent("Spacing"));
-                EditorGUILayout.PropertyField(m_GroupOutput, new GUIContent("Group Output"));
-                if (m_Output.enumValueIndex != 0)
+                if (m_Output.enumValueIndex != 0) // Surface / Mesh only
+                {
+                    EditorGUILayout.PropertyField(m_GroupOutput, new GUIContent("Group Output"));
                     EditorGUILayout.PropertyField(m_CurveSegments, new GUIContent("Curve Segments"));
+                }
             }
 
             serializedObject.ApplyModifiedProperties();

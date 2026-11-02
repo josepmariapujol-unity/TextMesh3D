@@ -358,6 +358,100 @@ namespace Softgraph.TextMesh3D.Tests
             Assert.AreEqual(5, glyphs.Count);
         }
 
+        // ---------- Undo / leaks / materials ----------
+
+        [Test]
+        public void Regenerate_CanBeUndone()
+        {
+            var container = Create("Hi", TextMesh3DContainer.Enum.Mesh);
+            Undo.IncrementCurrentGroup();
+            container.Function();
+
+            Undo.IncrementCurrentGroup();
+            container.m_Text = "Hello";
+            container.Function();
+            Assert.AreEqual(5, container.transform.GetChild(0).childCount);
+
+            Undo.PerformUndo();
+
+            Assert.AreEqual(1, container.transform.childCount, "Undo should restore exactly the previous output");
+            var root = container.transform.GetChild(0);
+            Assert.AreEqual(2, root.childCount);
+            Assert.AreEqual("Glyph - H", root.GetChild(0).name);
+            Assert.IsNotNull(GetMesh(root.GetChild(0)), "Restored glyph lost its mesh");
+        }
+
+        [Test]
+        public void Generate_DoesNotLeakTemporaryMeshes()
+        {
+            var container = Create("AB", TextMesh3DContainer.Enum.Mesh);
+            int before = Resources.FindObjectsOfTypeAll<Mesh>().Length;
+
+            container.Function();
+
+            int created = Resources.FindObjectsOfTypeAll<Mesh>().Length - before;
+            Assert.AreEqual(2, created, "Expected exactly one mesh per glyph; temporary wall/cap meshes must be destroyed");
+        }
+
+        [Test]
+        public void Generate_UsesSharedMaterial_NoInstances()
+        {
+            var material = AssetDatabase.LoadAssetAtPath<Material>(PackageRoot + "/Editor/Resources/Materials/FontMaterial.mat");
+            Assert.IsNotNull(material);
+            var container = Create("A", TextMesh3DContainer.Enum.Mesh);
+            container.m_Material = material;
+
+            var glyphs = Generate(container);
+
+            Assert.AreSame(material, glyphs[0].GetComponent<MeshRenderer>().sharedMaterial, "Renderer should reference the material asset, not a copy");
+        }
+
+        // ---------- Group Output ----------
+
+        [TestCase(TextMesh3DContainer.Enum.Mesh)]
+        [TestCase(TextMesh3DContainer.Enum.Surface)]
+        public void GroupOutput_MergesAllGlyphsIntoRootMesh(TextMesh3DContainer.Enum mode)
+        {
+            const string text = "AB C";
+            var separate = Generate(Create(text, mode));
+            int expectedVertices = 0;
+            float expectedRight = float.MinValue;
+            foreach (var g in separate)
+            {
+                var m = GetMesh(g);
+                if (m == null) continue;
+                expectedVertices += m.vertexCount;
+                expectedRight = Mathf.Max(expectedRight, g.localPosition.x + m.bounds.max.x);
+            }
+
+            var grouped = Create(text, mode);
+            grouped.m_GroupOutput = true;
+            grouped.Function();
+
+            Assert.AreEqual(0, grouped.transform.childCount, "Grouped output should not leave per-glyph objects");
+            var mesh = grouped.GetComponent<MeshFilter>().sharedMesh;
+            Assert.IsNotNull(mesh);
+            AssertValidMesh(mesh);
+            Assert.AreEqual(expectedVertices, mesh.vertexCount);
+            Assert.AreEqual(expectedRight, mesh.bounds.max.x, k_Eps, "Glyphs must keep their layout positions");
+            Assert.AreEqual(mesh.vertexCount, mesh.uv.Length);
+        }
+
+        [Test]
+        public void GroupOutput_TurnedOff_RestoresPerGlyphObjectsAndClearsRootMesh()
+        {
+            var container = Create("AB", TextMesh3DContainer.Enum.Mesh);
+            container.m_GroupOutput = true;
+            container.Function();
+            Assert.IsNotNull(container.GetComponent<MeshFilter>().sharedMesh);
+
+            container.m_GroupOutput = false;
+            var glyphs = Generate(container);
+
+            Assert.AreEqual(2, glyphs.Count);
+            Assert.IsNull(container.GetComponent<MeshFilter>().sharedMesh, "Old grouped mesh should be removed");
+        }
+
         [Test]
         public void Generate_CachesFontBytesForPlayerBuilds()
         {
