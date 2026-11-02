@@ -29,7 +29,7 @@ namespace Softgraph.TextMesh3D.Runtime
         [SerializeField]
         public float m_Extrusion;
 
-        [SerializeField]
+        [SerializeField, Tooltip("Em size in Unity units. Same visual size for every font, regardless of its UnitsPerEm.")]
         public float m_Size;
 
         [SerializeField]
@@ -171,8 +171,8 @@ namespace Softgraph.TextMesh3D.Runtime
 
             var advanceWidth = float3.zero;
 
-            var scale = 0.01f * m_Size;
-            var spaceWidth = 446f;
+            // m_Size is the em size in Unity units, so text has the same size for any font regardless of UnitsPerEm.
+            var scale = GetFontScale(typeface, m_Size);
 
             for (int i = 0; i < objToSpawn.Length; i++)
             {
@@ -194,22 +194,34 @@ namespace Softgraph.TextMesh3D.Runtime
                 container.RemoveSplineAt(0);
 
                 //Adding Glyph to gameObjects
-                Glyph glyph = typeface.GetGlyph(typeface.GetGlyphIndex(m_Text[i]));
+                ushort glyphIndex = typeface.GetGlyphIndex(m_Text[i]);
+                Glyph glyph = typeface.GetGlyph(glyphIndex);
                 GlyphSplineReader glyphSplineReader = new GlyphSplineReader(container);
                 glyphSplineReader.Read(glyph, scale);
 
-                //Set Position of gameObjects with advanceWidth
+                //Place the glyph at the pen position, then move the pen by the font's advance width.
+                //The advance includes the side bearings, so it works for narrow glyphs and spaces alike.
                 objToSpawn[i].transform.localPosition = new Vector3(advanceWidth.x, advanceWidth.y, advanceWidth.z);
-                if (m_Text[i].ToString() == " ")
-                {
-                    advanceWidth.x += spaceWidth * scale + m_Spacing;  //Spacing for Space characters (446*2)
-                }
-                else
-                {
-                    advanceWidth.x += glyph.Bounds.XMax * scale + m_Spacing;
-                }
+                advanceWidth.x += GetAdvanceWidth(typeface, glyphIndex) * scale + m_Spacing;
             }
             return true;
+        }
+
+        /// <summary>Font units to Unity units: one em (UnitsPerEm font units) becomes <paramref name="size"/> units.</summary>
+        internal static float GetFontScale(Typeface typeface, float size)
+        {
+            var unitsPerEm = typeface.UnitsPerEm > 0 ? typeface.UnitsPerEm : 1000f;
+            return size / unitsPerEm;
+        }
+
+        /// <summary>Horizontal advance in font units, from the font's hmtx table.</summary>
+        internal static float GetAdvanceWidth(Typeface typeface, ushort glyphIndex)
+        {
+            float advance = typeface.GetAdvanceWidthFromGlyphIndex(glyphIndex);
+            if (advance > 0f) return advance;
+
+            // Some fonts report 0 for a missing glyph; fall back to a quarter em so text doesn't collapse.
+            return typeface.UnitsPerEm > 0 ? typeface.UnitsPerEm * 0.25f : 250f;
         }
 
         private void DoSurface()

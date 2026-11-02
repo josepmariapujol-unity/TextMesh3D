@@ -26,18 +26,23 @@ namespace Softgraph.TextMesh3D.Tests
     {
         static string BaselineDir => Path.GetFullPath(PackageRoot + "/Tests/Editor/Baselines");
 
+        // 20.48 = Roboto's UnitsPerEm / 100, i.e. the scale the package used before sizes were em-based.
+        // Keeps magnitudes large enough for 3-decimal rounding and makes old/new baselines directly comparable.
+        const float k_Size = 20.48f;
+
         public static IEnumerable<TestCaseData> Cases()
         {
             yield return Case("Mesh_HelloWorld", "Hello World", TextMesh3DContainer.Enum.Mesh);
             yield return Case("Mesh_Holes", "ABOabdeg8", TextMesh3DContainer.Enum.Mesh);
             yield return Case("Mesh_MultiContour", "i?%&@", TextMesh3DContainer.Enum.Mesh);
-            yield return Case("Mesh_Size2_Extrude5", "Rq", TextMesh3DContainer.Enum.Mesh, extrusion: 5f, size: 2f);
+            yield return Case("Mesh_Size2_Extrude5", "Rq", TextMesh3DContainer.Enum.Mesh, extrusion: 5f, size: 2f * k_Size);
             yield return Case("Surface_Mixed", "AaBb 12", TextMesh3DContainer.Enum.Surface);
             yield return Case("Spline_Mixed", "AaBb gR", TextMesh3DContainer.Enum.Spline);
             yield return Case("Spline_Spacing", "WAVE", TextMesh3DContainer.Enum.Spline, spacing: 1.5f);
+            yield return Case("Spline_NarrowGlyphs", "il1 jt", TextMesh3DContainer.Enum.Spline);
         }
 
-        static TestCaseData Case(string name, string text, TextMesh3DContainer.Enum mode, float extrusion = 1f, float size = 1f, float spacing = 0f) =>
+        static TestCaseData Case(string name, string text, TextMesh3DContainer.Enum mode, float extrusion = 1f, float size = k_Size, float spacing = 0f) =>
             new TestCaseData(name, text, mode, extrusion, size, spacing).SetName("Snapshot_" + name);
 
         [TestCaseSource(nameof(Cases))]

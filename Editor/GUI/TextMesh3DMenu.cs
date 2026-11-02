@@ -45,7 +45,7 @@ namespace Softgraph.TextMesh3D.Editor
             container.m_Output = TextMesh3DContainer.Enum.Mesh;
             container.m_Size = 1;
             container.m_Material = material;
-            container.m_Extrusion = 3f;
+            container.m_Extrusion = 0.2f; // m_Size is the em height in Unity units, so 1 => capitals ~0.7 units tall
             container.m_Spacing = 0;
             container.m_GroupOutput = false;
 

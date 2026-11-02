@@ -7,8 +7,6 @@ namespace Softgraph.TextMesh3D.Editor
     [CustomEditor(typeof(TextMesh3DContainer))]
     public class TextMesh3DContainerEditor : UnityEditor.Editor
     {
-        static GUIStyle s_HelpLabelStyle;
-
         SerializedProperty m_Text;
         SerializedProperty m_Font;
         SerializedProperty m_Output;

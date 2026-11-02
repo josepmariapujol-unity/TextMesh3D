@@ -16,13 +16,13 @@ namespace Softgraph.TextMesh3D.Tests
         const float k_Eps = 1e-3f;
 
         // A spread of shapes: holes (A B O o e 8 @ Q R), multiple outers (i ? %), curves, straight lines, digits.
-        static readonly string[] k_Glyphs = { "A", "B", "O", "o", "e", "g", "i", "8", "R", "Q", "W", "1", "?", "&", "@", "%" };
+        static string[] k_Glyphs => new[] { "A", "B", "O", "o", "e", "g", "i", "8", "R", "Q", "W", "1", "?", "&", "@", "%" };
 
         readonly List<TextMesh3DContainer> m_Created = new List<TextMesh3DContainer>();
 
-        TextMesh3DContainer Create(string text, TextMesh3DContainer.Enum mode, float extrusion = 1f, float size = 1f, float spacing = 0f)
+        TextMesh3DContainer Create(string text, TextMesh3DContainer.Enum mode, float extrusion = 1f, float size = 1f, float spacing = 0f, Font font = null)
         {
-            var c = CreateContainer(text, mode, extrusion, size, spacing);
+            var c = CreateContainer(text, mode, extrusion, size, spacing, font);
             m_Created.Add(c);
             return c;
         }
@@ -157,6 +157,71 @@ namespace Softgraph.TextMesh3D.Tests
             var l = GetMesh(large[0]).bounds.size;
             Assert.AreEqual(2f * s.x, l.x, k_Eps);
             Assert.AreEqual(2f * s.z, l.z, k_Eps);
+        }
+
+        // ---------- Font metrics (UnitsPerEm / advance width) ----------
+
+        // Roboto & co. use 2048 units per em, Baskerville uses 1000.
+        static string[] k_Fonts => new[] { "Roboto.ttf", "Baskerville.ttf", "Arial.ttf", "Garamond.ttf" };
+
+        [TestCaseSource(nameof(k_Fonts))]
+        public void Layout_PenAdvancesByFontAdvanceWidth(string fontFile)
+        {
+            const string text = "Hil lo W.";
+            const float size = 3f;
+            var path = FontPath(fontFile);
+            var typeface = LoadTypeface(path);
+            var glyphs = Generate(Create(text, TextMesh3DContainer.Enum.Spline, size: size, font: LoadFont(path)));
+
+            float scale = size / typeface.UnitsPerEm;
+            float expectedX = 0f;
+            for (int i = 0; i < text.Length; i++)
+            {
+                Assert.AreEqual(expectedX, glyphs[i].localPosition.x, k_Eps, $"'{text[i]}' (index {i}) is misplaced");
+                expectedX += typeface.GetAdvanceWidthFromGlyphIndex(typeface.GetGlyphIndex(text[i])) * scale;
+            }
+        }
+
+        [TestCaseSource(nameof(k_Fonts))]
+        public void Size_IsEmBased_IndependentOfUnitsPerEm(string fontFile)
+        {
+            const float size = 1f;
+            var path = FontPath(fontFile);
+            var typeface = LoadTypeface(path);
+            var mesh = GetMesh(Generate(Create("H", TextMesh3DContainer.Enum.Surface, size: size, font: LoadFont(path)))[0]);
+
+            // Cap height in Unity units must equal the font's cap height as a fraction of the em.
+            float capHeightEm = typeface.GetGlyph(typeface.GetGlyphIndex('H')).Bounds.YMax / (float)typeface.UnitsPerEm;
+            Assert.AreEqual(capHeightEm * size, mesh.bounds.max.z, k_Eps);
+
+            // And every regular Latin font lands in a sane range (bundled fonts: 0.63 - 0.76 em).
+            Assert.That(mesh.bounds.max.z, Is.InRange(0.55f * size, 0.85f * size), "Cap height should be ~0.7 em");
+        }
+
+        [Test]
+        public void Layout_SpaceUsesFontSpaceAdvance()
+        {
+            const float size = 2f;
+            var typeface = LoadTypeface(RobotoPath);
+            var glyphs = Generate(Create("A B", TextMesh3DContainer.Enum.Spline, size: size));
+
+            float scale = size / typeface.UnitsPerEm;
+            float spaceAdvance = typeface.GetAdvanceWidthFromGlyphIndex(typeface.GetGlyphIndex(' ')) * scale;
+            Assert.Greater(spaceAdvance, 0f);
+            Assert.AreEqual(spaceAdvance, glyphs[2].localPosition.x - glyphs[1].localPosition.x, k_Eps);
+        }
+
+        [Test]
+        public void Layout_NarrowGlyphsAreNotOverlapping()
+        {
+            // Pen advance must be at least the ink width, plus right side bearing, for "i" and "l".
+            var glyphs = Generate(Create("ilil", TextMesh3DContainer.Enum.Surface, size: 1f));
+            for (int i = 0; i + 1 < glyphs.Count; i++)
+            {
+                var inkRight = glyphs[i].localPosition.x + GetMesh(glyphs[i]).bounds.max.x;
+                var nextInkLeft = glyphs[i + 1].localPosition.x + GetMesh(glyphs[i + 1]).bounds.min.x;
+                Assert.Greater(nextInkLeft, inkRight, $"Glyph {i + 1} overlaps or touches glyph {i}");
+            }
         }
 
         // ---------- Regeneration / font data ----------

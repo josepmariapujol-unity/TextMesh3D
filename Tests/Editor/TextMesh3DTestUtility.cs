@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.IO;
 using NUnit.Framework;
 using Softgraph.TextMesh3D.Runtime;
 using UnityEditor;
@@ -13,11 +14,22 @@ namespace Softgraph.TextMesh3D.Tests
         public const string PackageRoot = "Packages/com.softgraph.textmesh3d";
         public const string RobotoPath = PackageRoot + "/Editor/Resources/Fonts/Roboto.ttf";
 
-        public static Font LoadRoboto()
+        public static string FontPath(string fileName) => PackageRoot + "/Editor/Resources/Fonts/" + fileName;
+
+        public static Font LoadFont(string assetPath)
         {
-            var font = AssetDatabase.LoadAssetAtPath<Font>(RobotoPath);
-            Assert.IsNotNull(font, $"Test font missing at {RobotoPath}");
+            var font = AssetDatabase.LoadAssetAtPath<Font>(assetPath);
+            Assert.IsNotNull(font, $"Test font missing at {assetPath}");
             return font;
+        }
+
+        public static Font LoadRoboto() => LoadFont(RobotoPath);
+
+        /// <summary>Parses the font file directly, independent of the code under test, to get reference metrics.</summary>
+        public static Typography.OpenFont.Typeface LoadTypeface(string assetPath)
+        {
+            using (var stream = File.OpenRead(Path.GetFullPath(assetPath)))
+                return new Typography.OpenFont.OpenFontReader().Read(stream);
         }
 
         public static TextMesh3DContainer CreateContainer(
@@ -25,12 +37,13 @@ namespace Softgraph.TextMesh3D.Tests
             TextMesh3DContainer.Enum mode,
             float extrusion = 1f,
             float size = 1f,
-            float spacing = 0f)
+            float spacing = 0f,
+            Font font = null)
         {
             var go = new GameObject("TextMesh3D Test");
             var container = go.AddComponent<TextMesh3DContainer>();
             container.m_Text = text;
-            container.m_Font = LoadRoboto();
+            container.m_Font = font != null ? font : LoadRoboto();
             container.m_Output = mode;
             container.m_Extrusion = extrusion;
             container.m_Size = size;
