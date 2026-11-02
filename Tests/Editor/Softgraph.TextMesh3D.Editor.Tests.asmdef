@@ -1,9 +1,11 @@
 {
     "name": "Softgraph.TextMesh3D.Editor.Tests",
-    "rootNamespace": "",
+    "rootNamespace": "Softgraph.TextMesh3D.Tests",
     "references": [
-        "Unity.[YourPackageName].[SubGroup].Editor",
-        "Unity.[YourPackageName].[SubGroup]",
+        "Softgraph.TextMesh3D",
+        "Softgraph.TextMesh3D.Editor",
+        "Unity.Splines",
+        "Unity.Mathematics",
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner"
     ],
@@ -14,7 +16,8 @@
     "allowUnsafeCode": false,
     "overrideReferences": true,
     "precompiledReferences": [
-        "nunit.framework.dll"
+        "nunit.framework.dll",
+        "Typography.OpenFont.dll"
     ],
     "autoReferenced": false,
     "defineConstraints": [

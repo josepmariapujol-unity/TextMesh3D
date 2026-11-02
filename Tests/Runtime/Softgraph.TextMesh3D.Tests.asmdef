@@ -1,8 +1,8 @@
 {
     "name": "Softgraph.TextMesh3D.Tests",
-    "rootNamespace": "",
+    "rootNamespace": "Softgraph.TextMesh3D.Tests",
     "references": [
-        "Unity.[YourPackageName].[SubGroup]",
+        "Softgraph.TextMesh3D",
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner"
     ],
