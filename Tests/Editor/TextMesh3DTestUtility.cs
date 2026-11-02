@@ -38,10 +38,12 @@ namespace Softgraph.TextMesh3D.Tests
             float extrusion = 1f,
             float size = 1f,
             float spacing = 0f,
-            Font font = null)
+            Font font = null,
+            int curveSegments = 3)
         {
             var go = new GameObject("TextMesh3D Test");
             var container = go.AddComponent<TextMesh3DContainer>();
+            container.m_CurveSegments = curveSegments;
             container.m_Text = text;
             container.m_Font = font != null ? font : LoadRoboto();
             container.m_Output = mode;
@@ -88,7 +90,8 @@ namespace Softgraph.TextMesh3D.Tests
         /// <summary>Sum of triangle areas, split by whether the face normal points up (+Y), down (-Y) or sideways.</summary>
         public static void MeasureAreas(Mesh mesh, out float up, out float down, out float side)
         {
-            up = down = side = 0f;
+            // Accumulate in double so the sums don't depend on triangle order (keeps snapshots stable).
+            double sumUp = 0, sumDown = 0, sumSide = 0;
             var v = mesh.vertices;
             var t = mesh.triangles;
             for (int i = 0; i < t.Length; i += 3)
@@ -97,10 +100,46 @@ namespace Softgraph.TextMesh3D.Tests
                 float area = cross.magnitude * 0.5f;
                 if (area <= 0f) continue;
                 float ny = cross.y / (2f * area);
-                if (ny > 0.5f) up += area;
-                else if (ny < -0.5f) down += area;
-                else side += area;
+                if (ny > 0.5f) sumUp += area;
+                else if (ny < -0.5f) sumDown += area;
+                else sumSide += area;
             }
+            up = (float)sumUp;
+            down = (float)sumDown;
+            side = (float)sumSide;
+        }
+
+        /// <summary>
+        /// Euler characteristic V - E + F of the up-facing triangles (vertices welded by position).
+        /// For a correctly filled flat glyph it equals (number of outlines) - (number of holes):
+        /// "H" = 1, "O" = 0, "B" = -1, "i" = 2, "%" = 1. A filled-in or misplaced hole changes it.
+        /// </summary>
+        public static int UpFacingEulerCharacteristic(Mesh mesh)
+        {
+            var v = mesh.vertices;
+            var t = mesh.triangles;
+            var vertexIds = new Dictionary<Vector3, int>();
+            var edges = new HashSet<(int, int)>();
+            int faces = 0;
+
+            int Id(Vector3 p)
+            {
+                if (!vertexIds.TryGetValue(p, out var id)) vertexIds[p] = id = vertexIds.Count;
+                return id;
+            }
+
+            for (int i = 0; i < t.Length; i += 3)
+            {
+                Vector3 a = v[t[i]], b = v[t[i + 1]], c = v[t[i + 2]];
+                if (Vector3.Cross(b - a, c - a).y <= 0f) continue;
+
+                int ia = Id(a), ib = Id(b), ic = Id(c);
+                edges.Add(ia < ib ? (ia, ib) : (ib, ia));
+                edges.Add(ib < ic ? (ib, ic) : (ic, ib));
+                edges.Add(ic < ia ? (ic, ia) : (ia, ic));
+                faces++;
+            }
+            return vertexIds.Count - edges.Count + faces;
         }
 
         public static float TotalArea(Mesh mesh)

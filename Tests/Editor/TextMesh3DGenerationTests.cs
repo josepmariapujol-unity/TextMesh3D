@@ -20,9 +20,9 @@ namespace Softgraph.TextMesh3D.Tests
 
         readonly List<TextMesh3DContainer> m_Created = new List<TextMesh3DContainer>();
 
-        TextMesh3DContainer Create(string text, TextMesh3DContainer.Enum mode, float extrusion = 1f, float size = 1f, float spacing = 0f, Font font = null)
+        TextMesh3DContainer Create(string text, TextMesh3DContainer.Enum mode, float extrusion = 1f, float size = 1f, float spacing = 0f, Font font = null, int curveSegments = 3)
         {
-            var c = CreateContainer(text, mode, extrusion, size, spacing, font);
+            var c = CreateContainer(text, mode, extrusion, size, spacing, font, curveSegments);
             m_Created.Add(c);
             return c;
         }
@@ -226,6 +226,97 @@ namespace Softgraph.TextMesh3D.Tests
             // The filled area must not exceed the glyph's bounding box (catches triangles leaking outside).
             var size = mesh.bounds.size;
             Assert.LessOrEqual(up, size.x * size.z * 1.001f);
+        }
+
+        // ---------- Holes / contour classification ----------
+
+        // Expected = outlines - holes. Helvetica and Futura list the holes before the outline, which used to
+        // make the mesher fill one counter of "B", "8", "&", "$". "%" used to give each ring the other's hole.
+        [TestCase("Roboto.ttf", "H", 1)]
+        [TestCase("Roboto.ttf", "O", 0)]
+        [TestCase("Roboto.ttf", "B", -1)]
+        [TestCase("Roboto.ttf", "i", 2)]
+        [TestCase("Roboto.ttf", "8", -1)]
+        [TestCase("Roboto.ttf", "%", 1)]
+        [TestCase("Roboto.ttf", "@", 0)]
+        [TestCase("Helvetica.ttf", "B", -1)]
+        [TestCase("Helvetica.ttf", "8", -1)]
+        [TestCase("Helvetica.ttf", "&", -1)]
+        [TestCase("Helvetica.ttf", "$", -1)]
+        [TestCase("Helvetica.ttf", "%", 1)]
+        [TestCase("Futura.ttf", "B", -1)]
+        [TestCase("Futura.ttf", "&", -1)]
+        [TestCase("Futura.ttf", "%", 1)]
+        [TestCase("ComicSans.TTF", "&", -1)]
+        [TestCase("ComicSans.TTF", "$", -1)]
+        [TestCase("Arial.ttf", "%", 1)]
+        public void Surface_HasCorrectNumberOfHoles(string fontFile, string glyph, int outlinesMinusHoles)
+        {
+            var mesh = GetMesh(Generate(Create(glyph, TextMesh3DContainer.Enum.Surface, font: LoadFont(FontPath(fontFile))))[0]);
+            Assert.AreEqual(outlinesMinusHoles, UpFacingEulerCharacteristic(mesh),
+                "Euler characteristic of the cap (outlines - holes) is wrong: a hole was filled or assigned to the wrong outline");
+        }
+
+        [TestCase("B")]
+        [TestCase("%")]
+        public void Mesh_TopCapHasCorrectNumberOfHoles(string glyph)
+        {
+            var surface = GetMesh(Generate(Create(glyph, TextMesh3DContainer.Enum.Surface, font: LoadFont(FontPath("Helvetica.ttf"))))[0]);
+            var solid = GetMesh(Generate(Create(glyph, TextMesh3DContainer.Enum.Mesh, font: LoadFont(FontPath("Helvetica.ttf"))))[0]);
+
+            // Up-facing triangles of the solid are just the top cap, so it must match the surface.
+            Assert.AreEqual(UpFacingEulerCharacteristic(surface), UpFacingEulerCharacteristic(solid));
+        }
+
+        // ---------- UVs / tangents ----------
+
+        [TestCase(TextMesh3DContainer.Enum.Mesh)]
+        [TestCase(TextMesh3DContainer.Enum.Surface)]
+        public void Mesh_HasUVsNormalsAndTangents(TextMesh3DContainer.Enum mode)
+        {
+            var mesh = GetMesh(Generate(Create("Bg", mode, extrusion: 0.5f, size: 2f))[0]);
+
+            Assert.AreEqual(mesh.vertexCount, mesh.uv.Length, "Missing UVs");
+            Assert.AreEqual(mesh.vertexCount, mesh.normals.Length, "Missing normals");
+            Assert.AreEqual(mesh.vertexCount, mesh.tangents.Length, "Missing tangents");
+            foreach (var uv in mesh.uv)
+                Assert.IsTrue(float.IsFinite(uv.x) && float.IsFinite(uv.y), $"Non-finite UV {uv}");
+        }
+
+        [Test]
+        public void UVs_AreInEmUnits_SoTextureScaleIsIndependentOfSize()
+        {
+            var small = GetMesh(Generate(Create("H", TextMesh3DContainer.Enum.Surface, size: 1f))[0]);
+            var large = GetMesh(Generate(Create("H", TextMesh3DContainer.Enum.Surface, size: 4f))[0]);
+
+            var smallUv = small.uv;
+            var largeUv = large.uv;
+            Assert.AreEqual(smallUv.Length, largeUv.Length);
+
+            float Extent(Vector2[] uvs) { float min = float.MaxValue, max = float.MinValue; foreach (var u in uvs) { min = Mathf.Min(min, u.y); max = Mathf.Max(max, u.y); } return max - min; }
+            Assert.AreEqual(Extent(smallUv), Extent(largeUv), 1e-3f);
+            Assert.That(Extent(smallUv), Is.InRange(0.5f, 0.9f), "Cap UV height should be the cap height in em (~0.7)");
+        }
+
+        // ---------- Curve quality ----------
+
+        [Test]
+        public void CurveSegments_IncreaseResolutionAndConvergeOnTheTrueShape()
+        {
+            var coarse = GetMesh(Generate(Create("O", TextMesh3DContainer.Enum.Surface, size: 10f, curveSegments: 1))[0]);
+            var normal = GetMesh(Generate(Create("O", TextMesh3DContainer.Enum.Surface, size: 10f, curveSegments: 3))[0]);
+            var fine = GetMesh(Generate(Create("O", TextMesh3DContainer.Enum.Surface, size: 10f, curveSegments: 12))[0]);
+
+            Assert.Less(coarse.vertexCount, normal.vertexCount);
+            Assert.Less(normal.vertexCount, fine.vertexCount);
+            AssertValidMesh(fine);
+            Assert.AreEqual(0, UpFacingEulerCharacteristic(fine), "'O' must keep exactly one hole at any resolution");
+
+            // Chords cut corners off a curved ring, so the area changes less and less as resolution goes up.
+            MeasureAreas(coarse, out var a1, out _, out _);
+            MeasureAreas(normal, out var a3, out _, out _);
+            MeasureAreas(fine, out var a12, out _, out _);
+            Assert.Less(Mathf.Abs(a12 - a3), Mathf.Abs(a3 - a1));
         }
 
         [Test]

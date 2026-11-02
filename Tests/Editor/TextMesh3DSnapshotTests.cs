@@ -132,6 +132,11 @@ namespace Softgraph.TextMesh3D.Tests
         static string F(float v) => Math.Round(v, 3).ToString("0.000", System.Globalization.CultureInfo.InvariantCulture);
         static string F(Vector3 v) => $"({F(v.x)},{F(v.y)},{F(v.z)})";
 
+        // Decimal values may differ by float noise in the last printed digit (e.g. summation order), so they are
+        // compared with a small tolerance. Integers (vertex / triangle / knot counts) and all text must match exactly.
+        const double k_DecimalTolerance = 0.002;
+        const string k_Decimal = @"-?\d+\.\d+";
+
         static string FirstDifference(string expected, string received)
         {
             var e = expected.Replace("\r\n", "\n").TrimEnd().Split('\n');
@@ -140,9 +145,25 @@ namespace Softgraph.TextMesh3D.Tests
             {
                 var el = i < e.Length ? e[i] : "<missing>";
                 var rl = i < r.Length ? r[i] : "<missing>";
-                if (el != rl) return $"line {i + 1}\n  expected: {el}\n  received: {rl}";
+                if (!LinesMatch(el, rl)) return $"line {i + 1}\n  expected: {el}\n  received: {rl}";
             }
             return null;
+        }
+
+        static bool LinesMatch(string expected, string received)
+        {
+            if (expected == received) return true;
+            if (System.Text.RegularExpressions.Regex.Replace(expected, k_Decimal, "#") != System.Text.RegularExpressions.Regex.Replace(received, k_Decimal, "#")) return false;
+
+            var e = System.Text.RegularExpressions.Regex.Matches(expected, k_Decimal);
+            var r = System.Text.RegularExpressions.Regex.Matches(received, k_Decimal);
+            for (int i = 0; i < e.Count; i++)
+            {
+                double a = double.Parse(e[i].Value, System.Globalization.CultureInfo.InvariantCulture);
+                double b = double.Parse(r[i].Value, System.Globalization.CultureInfo.InvariantCulture);
+                if (Math.Abs(a - b) > k_DecimalTolerance) return false;
+            }
+            return true;
         }
     }
 }

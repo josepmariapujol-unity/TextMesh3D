@@ -15,6 +15,7 @@ namespace Softgraph.TextMesh3D.Editor
         SerializedProperty m_Spacing;
         SerializedProperty m_GroupOutput;
         SerializedProperty m_Size;
+        SerializedProperty m_CurveSegments;
 
         const string k_Font = "Font";
         const string k_Output = "Splines/Surfaces/Meshes";
@@ -36,6 +37,7 @@ namespace Softgraph.TextMesh3D.Editor
             m_Spacing = serializedObject.FindProperty("m_Spacing");
             m_GroupOutput = serializedObject.FindProperty("m_GroupOutput");
             m_Size = serializedObject.FindProperty("m_Size");
+            m_CurveSegments = serializedObject.FindProperty("m_CurveSegments");
         }
 
         public override void OnInspectorGUI()
@@ -62,6 +64,8 @@ namespace Softgraph.TextMesh3D.Editor
             {
                 EditorGUILayout.PropertyField(m_Spacing, new GUIContent(k_Spacing));
                 EditorGUILayout.PropertyField(m_GroupOutput, new GUIContent(k_GroupOutput));
+                if (m_Output.enumValueIndex != 0)
+                    EditorGUILayout.PropertyField(m_CurveSegments, new GUIContent("Curve Segments"));
             }
 
             serializedObject.ApplyModifiedProperties();

@@ -16,6 +16,7 @@ namespace Softgraph.TextMesh3D.Editor
         private SerializedProperty m_Spacing;
         private SerializedProperty m_GroupOutput;
         private SerializedProperty m_Size;
+        private SerializedProperty m_CurveSegments;
 
         // A reference to the target TextMesh3DContainer script
         private TextMesh3DContainer targetContainer;
@@ -48,6 +49,7 @@ namespace Softgraph.TextMesh3D.Editor
                 m_Spacing = serializedObject.FindProperty("m_Spacing");
                 m_GroupOutput = serializedObject.FindProperty("m_GroupOutput");
                 m_Size = serializedObject.FindProperty("m_Size");
+                m_CurveSegments = serializedObject.FindProperty("m_CurveSegments");
             }
         }
 
@@ -92,6 +94,8 @@ namespace Softgraph.TextMesh3D.Editor
             {
                 EditorGUILayout.PropertyField(m_Spacing, new GUIContent("Spacing"));
                 EditorGUILayout.PropertyField(m_GroupOutput, new GUIContent("Group Output"));
+                if (m_Output.enumValueIndex != 0)
+                    EditorGUILayout.PropertyField(m_CurveSegments, new GUIContent("Curve Segments"));
             }
 
             serializedObject.ApplyModifiedProperties();

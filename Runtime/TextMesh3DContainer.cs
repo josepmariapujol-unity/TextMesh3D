@@ -41,6 +41,9 @@ namespace Softgraph.TextMesh3D.Runtime
         [SerializeField]
         public bool m_GroupOutput;
 
+        [SerializeField, Range(1, 32), Tooltip("Points per curved outline segment. Higher gives smoother curves and more triangles.")]
+        public int m_CurveSegments = 3;
+
         public enum Enum
         {
             Spline,
@@ -48,21 +51,8 @@ namespace Softgraph.TextMesh3D.Runtime
             Mesh
         }
 
-        private GameObject objParentSpawn;
         private GameObject[] objToSpawn;
         private SplineContainer[] m_Spline;
-
-        private Vector3[] vertices;
-        private int[] triangles;
-
-        private Vector3[][] outerVerticesLower;
-        private Vector3[][] outerVerticesUpper;
-
-        private Vector3[][] innerVerticesLower;
-        private Vector3[][] innerVerticesUpper;
-
-        private CombineInstance[] combineInstance;
-        private List<float3>[] verticesListArray;
 
         [SerializeField][HideInInspector] private GameObject myText;
 
@@ -227,453 +217,355 @@ namespace Softgraph.TextMesh3D.Runtime
         private void DoSurface()
         {
             if (!DoSpline()) return;
-
-            for (int i = 0; i < objToSpawn.Length; i++)
-            {
-                if (m_Text[i].ToString() == " ")
-                {
-                    continue;
-                }
-
-                m_Spline[i] = objToSpawn[i].GetComponent<SplineContainer>();
-                objToSpawn[i].AddComponent<MeshFilter>();
-                objToSpawn[i].AddComponent<MeshRenderer>().material = m_Material;
-
-                RemoveSingleKnot(i);
-                var branchNumber = m_Spline[i].Splines.Count;
-
-                if (branchNumber > 1)
-                {
-                    var polygon = m_Spline[i].Splines[0];               //first branch
-                    var point = m_Spline[i].Splines[1][0].Position;     //first knot second branch
-
-                    if (!IsPointInsidePolygon(point, polygon))
-                    {
-                        m_Spline[i].AddSpline(m_Spline[i].Splines[0]);        //Mostly e-a-o-R-p
-                        m_Spline[i].RemoveSpline(m_Spline[i].Splines[0]);
-                    }
-                }
-
-                // If outer spline is clockwise we will reverse the whole SplineContainer, else nothing happen since its already counter clockwise by default
-                ReturnCounterClockWiseSpline(i, TriangulationUtility.IsClockWiseSpline(m_Spline[i].Splines[0]));
-
-                List<bool> listHolesBool = new List<bool>();
-                var outerBranchNumber = 0;
-                //Calculate the number of outer splines. For example: "i" has 2 outer branches (both branches), "B" has 1 (exterior)
-                //Calculate list for clockwise or counter clockwise
-                for (int j = 0; j < branchNumber; j++)
-                {
-                    if (!TriangulationUtility.IsClockWiseSpline(m_Spline[i].Splines[j]))
-                    {
-                        outerBranchNumber++;
-                        listHolesBool.Add(false);
-                    }
-                    else
-                    {
-                        listHolesBool.Add(true);
-                    }
-                }
-
-                //top(s) + bottom(s) meshes
-                combineInstance = new CombineInstance[outerBranchNumber + outerBranchNumber];     //*2 for the mesh on the top
-                verticesListArray = new List<float3>[branchNumber];
-
-                GameObject empty = new GameObject();
-                var localToWorldMatrix = empty.transform.localToWorldMatrix;
-
-                for (int j = 0; j < branchNumber; j++)
-                {
-                    var knotNumber = m_Spline[i].Splines[j].Count;      //knots x layers
-                    verticesListArray[j] = new List<float3>();
-                    CreateDetailedVerticesListWhenTangentsExist(i, j, knotNumber, out verticesListArray[j]);
-                }
-
-                DoFillMesh(branchNumber, listHolesBool, outerBranchNumber, localToWorldMatrix, 0, 0);
-
-                SafeDestroy(empty);
-
-                Mesh combinedMesh = new Mesh();
-                combinedMesh.name = objToSpawn[i].name;
-                combinedMesh.CombineMeshes(combineInstance, true);
-                objToSpawn[i].GetComponent<MeshFilter>().mesh = combinedMesh;
-
-                SafeDestroy(objToSpawn[i].GetComponent<SplineContainer>());
-            }
+            BuildGlyphMeshes(extrude: false);
         }
 
         private void DoMesh()
         {
             if (!DoSpline()) return;
+            BuildGlyphMeshes(extrude: true);
+        }
 
-            //Run for every string character and continue for empty spaces
+        /// <summary>One closed outline of a glyph, flattened to a polygon on the XZ plane.</summary>
+        private sealed class Contour
+        {
+            public Spline spline;
+            public List<Vector3> points;   // sampled outline, XZ plane
+            public float signedArea;       // shoelace area in (x, z); > 0 = counter-clockwise
+            public bool isHole;
+            public int parent = -1;        // for holes: index of the outline that contains it
+        }
+
+        private void BuildGlyphMeshes(bool extrude)
+        {
+            float height = extrude ? m_Extrusion : 0f;
+
             for (int i = 0; i < objToSpawn.Length; i++)
             {
-                if (m_Text[i].ToString() == " ")
+                if (m_Text[i] == ' ')
                 {
                     continue;
                 }
 
-                m_Spline[i] = objToSpawn[i].GetComponent<SplineContainer>();
+                var splineContainer = objToSpawn[i].GetComponent<SplineContainer>();
                 objToSpawn[i].AddComponent<MeshFilter>();
                 objToSpawn[i].AddComponent<MeshRenderer>().material = m_Material;
 
-                RemoveSingleKnot(i);
+                var contours = BuildContours(splineContainer);
 
-                //Number of branches in one spline i,o,p = 2; B = 3
-                var branchNumber = m_Spline[i].Splines.Count;
+                // Order: walls, then top caps, then bottom caps (same order as before the refactor).
+                var walls = new List<Mesh>();
+                var tops = new List<Mesh>();
+                var bottoms = new List<Mesh>();
 
-                if (branchNumber > 1)
+                if (extrude)
                 {
-                    var polygon = m_Spline[i].Splines[0];               //first branch
-                    var point = m_Spline[i].Splines[1][0].Position;     //first knot second branch
-
-                    if (!IsPointInsidePolygon(point, polygon))
+                    foreach (var contour in contours)
                     {
-                        m_Spline[i].AddSpline(m_Spline[i].Splines[0]);        //Mostly e-a-o-R-p
-                        m_Spline[i].RemoveSpline(m_Spline[i].Splines[0]);
+                        walls.Add(BuildWalls(contour.points, height));
                     }
                 }
 
-                // If outer spline is clockwise we will reverse the whole SplineContainer, else nothing happen since its already counter clockwise by default
-                ReturnCounterClockWiseSpline(i, TriangulationUtility.IsClockWiseSpline(m_Spline[i].Splines[0]));
-
-                List<bool> listHolesBool = new List<bool>();
-                var outerBranchNumber = 0;
-                //Calculate the number of outer splines. For example: "i" has 2 outer branches (both branches), "B" has 1 (exterior)
-                //Calculate list for clockwise or counter clockwise
-                for (int j = 0; j < branchNumber; j++)
+                for (int c = 0; c < contours.Count; c++)
                 {
-                    if (!TriangulationUtility.IsClockWiseSpline(m_Spline[i].Splines[j]))
+                    if (contours[c].isHole) continue;
+
+                    var holes = new List<Contour>();
+                    foreach (var other in contours)
                     {
-                        outerBranchNumber++;
-                        listHolesBool.Add(false);
+                        if (other.isHole && other.parent == c) holes.Add(other);
                     }
-                    else
-                    {
-                        listHolesBool.Add(true);
-                    }
+
+                    BuildCaps(contours[c], holes, height, out var top, out var bottom);
+                    if (top != null) tops.Add(top);
+                    if (bottom != null) bottoms.Add(bottom);
                 }
 
-                var innerBranchNumber = branchNumber - outerBranchNumber;
+                var parts = new List<Mesh>(walls.Count + tops.Count + bottoms.Count);
+                parts.AddRange(walls);
+                parts.AddRange(tops);
+                parts.AddRange(bottoms);
 
-                //Number of outer vertices
-                outerVerticesLower = new Vector3[outerBranchNumber][];
-                outerVerticesUpper = new Vector3[outerBranchNumber][];
+                var combined = Combine(parts, objToSpawn[i].name, recalculateNormals: extrude);
+                objToSpawn[i].GetComponent<MeshFilter>().sharedMesh = combined;
 
-                //Number of inner vertices or holes
-                innerVerticesLower = new Vector3[innerBranchNumber][];
-                innerVerticesUpper = new Vector3[innerBranchNumber][];
-
-                //Lateral(s) + top(s) + bottom(s) meshes
-                combineInstance = new CombineInstance[branchNumber + outerBranchNumber + outerBranchNumber];     //*2 for the mesh on the top
-                verticesListArray = new List<float3>[branchNumber];
-
-                GameObject empty = new GameObject();
-                var localToWorldMatrix = empty.transform.localToWorldMatrix;
-
-                DoLateralMeshing(branchNumber, i, localToWorldMatrix);
-
-                DoFillMesh(branchNumber, listHolesBool, outerBranchNumber, localToWorldMatrix, m_Extrusion, branchNumber);
-
-                SafeDestroy(empty);
-
-                Mesh combinedMesh = new Mesh();
-                combinedMesh.name = objToSpawn[i].name;
-                combinedMesh.CombineMeshes(combineInstance, true);
-                combinedMesh.RecalculateNormals();
-                objToSpawn[i].GetComponent<MeshFilter>().mesh = combinedMesh;
-
-                SafeDestroy(objToSpawn[i].GetComponent<SplineContainer>());
+                SafeDestroy(splineContainer);
             }
         }
 
-        private void RemoveSingleKnot(int i)
+        /// <summary>
+        /// Samples every spline into a polygon and classifies it by nesting depth: a contour inside an odd number
+        /// of other contours is a hole. This does not depend on contour order or on the font's winding convention
+        /// (some fonts list holes before the outline, which used to fill holes in e.g. Helvetica "B" and "8").
+        /// Outlines are oriented counter-clockwise and holes clockwise, as the triangulator expects.
+        /// </summary>
+        private List<Contour> BuildContours(SplineContainer container)
         {
-            //Some fonts have 1 single knot at the beginning so we dont want to mesh it then removing
-            if (m_Spline[i].Splines[0].Count == 1)
+            var contours = new List<Contour>();
+            foreach (var spline in container.Splines)
             {
-                m_Spline[i].RemoveSpline(m_Spline[i].Splines[0]);
+                // Some fonts emit single-knot "contours"; they enclose nothing.
+                if (spline.Count < 2) continue;
+
+                var points = SampleSpline(spline);
+                var area = SignedArea(points);
+                if (points.Count < 3 || Mathf.Abs(area) <= float.Epsilon) continue;
+
+                contours.Add(new Contour { spline = spline, points = points, signedArea = area });
             }
-        }
 
-        private void DoLateralMeshing(int branchNumber, int i, Matrix4x4 localToWorldMatrix)
-        {
-            var outerMeshRunningNumber = 0;
-            var innerMeshRunningNumber = 0;
-            for (int j = 0; j < branchNumber; j++)
+            for (int i = 0; i < contours.Count; i++)
             {
-                var extrusionNumber = 2;                               //layers: bottom and top
-                var knotNumber = m_Spline[i].Splines[j].Count;      //knots x layers
-
-                verticesListArray[j] = new List<float3>();
-
-                CreateDetailedVerticesListWhenTangentsExist(i, j, knotNumber, out verticesListArray[j]);
-
-                //Adding extra knots(splines) from points when Tangents exist for detailed meshing
-                knotNumber = verticesListArray[j].Count;
-
-                //For triangulation purposes we need to duplicate vertices. One normal vector for vertices
-                var knotNumberDoubleVertices = knotNumber * 2;
-
-                vertices = new Vector3[knotNumberDoubleVertices * 2]; // why so many? every lateral face needs double vertices due to normals plus frontal meshing
-                triangles = new int[FindTotalTrianglesExtrusion(knotNumber)];
-
-                //Setting the number outer vertices
-                if (!TriangulationUtility.IsClockWiseSpline(m_Spline[i].Splines[j]))
+                int depth = 0;
+                for (int j = 0; j < contours.Count; j++)
                 {
-                    outerVerticesLower[outerMeshRunningNumber] = new Vector3[knotNumberDoubleVertices];
-                    outerVerticesUpper[outerMeshRunningNumber] = new Vector3[knotNumberDoubleVertices];
-                    outerMeshRunningNumber++;
+                    if (i != j && IsPointInsidePolygon(contours[i].points[0], contours[j].points)) depth++;
                 }
-                else
-                {
-                    innerVerticesLower[innerMeshRunningNumber] = new Vector3[knotNumberDoubleVertices];
-                    innerVerticesUpper[innerMeshRunningNumber] = new Vector3[knotNumberDoubleVertices];
-                    innerMeshRunningNumber++;
-                }
-                for (int k = 0; k < knotNumber; k++)
-                {
-                    var index = k * 2;
-
-                    vertices[index] = verticesListArray[j][GetIndex(knotNumber, k)];
-                    vertices[index + 1] = verticesListArray[j][GetIndex(knotNumber, k + 1)];
-
-                    vertices[index + knotNumberDoubleVertices] = verticesListArray[j][GetIndex(knotNumber, k)] + new float3(0, m_Extrusion, 0);
-                    vertices[index + 1 + knotNumberDoubleVertices] = verticesListArray[j][GetIndex(knotNumber, k + 1)] + new float3(0, m_Extrusion, 0);
-                }
-
-                TriangulateLateralFaces(extrusionNumber, knotNumber);
-
-                combineInstance[j].mesh = new Mesh();
-                combineInstance[j].mesh.vertices = vertices;
-                combineInstance[j].mesh.triangles = triangles;
-                combineInstance[j].mesh.RecalculateNormals();
-                combineInstance[j].transform = localToWorldMatrix;
+                contours[i].isHole = depth % 2 == 1;
             }
-        }
 
-        private void DoFillMesh(int branchNumber, List<bool> listHolesBool, int outerBranchNumber, Matrix4x4 localToWorldMatrix, float extrusion, int branchNumberMesh)
-        {
-            var c = 0;
-            for (int j = 0; j < branchNumber; j++)
+            // A hole belongs to the smallest outline that contains it.
+            for (int i = 0; i < contours.Count; i++)
             {
-                if (listHolesBool[j] == false)
+                if (!contours[i].isHole) continue;
+
+                float bestArea = float.MaxValue;
+                for (int j = 0; j < contours.Count; j++)
                 {
-                    //Hull
-                    List<Vector3> hullPoints = new List<Vector3>();
-
-                    // hullPoints.Clear(); //Clean for safety
-                    for (int k = 0; k < verticesListArray[j].Count; k++)
+                    if (contours[j].isHole) continue;
+                    float area = Mathf.Abs(contours[j].signedArea);
+                    if (area < bestArea && IsPointInsidePolygon(contours[i].points[0], contours[j].points))
                     {
-                        hullPoints.Add(verticesListArray[j][k]);
+                        bestArea = area;
+                        contours[i].parent = j;
                     }
-
-                    List<Vector2> hullPoints2D = hullPoints.Select(x1 => x1.ToVector2()).ToList();
-
-                    //Holes
-                    HashSet<List<Vector2>> allHolePoints2D = new HashSet<List<Vector2>>();
-                    List<Vector3> holePoints = new List<Vector3>();
-                    holePoints.Clear();
-
-                    for (int k = 0; k < (listHolesBool.Count - j); k++)
-                    {
-                        if (j + k + 1 < listHolesBool.Count && listHolesBool[j + k + 1])
-                        {
-                            for (int w = 0; w < verticesListArray[j + k + 1].Count; w++)
-                            {
-                                holePoints.Add(verticesListArray[j + k + 1][w]);
-                            }
-
-                            List<Vector2> holePoints2D = holePoints.Select(x1 => x1.ToVector2()).ToList();
-                            allHolePoints2D.Add(holePoints2D);
-                            holePoints.Clear(); //Clean for safety
-                        }
-                    }
-
-                    //Normalize to range 0-1
-                    //We should use all points, including the constraints because the hole may be outside of the random points
-                    List<Vector2> allPoints = new List<Vector2>();
-                    allPoints.AddRange(hullPoints2D);
-
-                    foreach (List<Vector2> hole in allHolePoints2D)
-                    {
-                        allPoints.AddRange(hole);
-                    }
-
-                    Normalizer2 normalizer = new Normalizer2(allPoints);
-                    List<Vector2> hullPoints2DNormalized = normalizer.Normalize(hullPoints2D);
-                    HashSet<List<Vector2>> allHolePoints2DNormalized = new HashSet<List<Vector2>>();
-
-                    foreach (List<Vector2> hole in allHolePoints2D)
-                    {
-                        List<Vector2> holeNormalized = normalizer.Normalize(hole);
-                        allHolePoints2DNormalized.Add(holeNormalized);
-                    }
-
-                    // Generate the triangulation -  Constrained delaunay
-                    HalfEdgeData2 triangleDataNormalized = Delaunay.ConstrainedBySloan(null, hullPoints2DNormalized, allHolePoints2DNormalized, shouldRemoveTriangles: true, new HalfEdgeData2());
-
-                    //UnNormalize
-                    HalfEdgeData2 triangleData = normalizer.UnNormalize(triangleDataNormalized);
-                    //From half-edge to triangle
-                    HashSet<Triangle2> triangles2D = TransformBetweenDataStructures.HalfEdge2ToTriangle2(triangleData);
-
-                    //From triangulation to mesh
-                    //Make sure the triangles have the correct orientation
-                    triangles2D = HelpMethods.OrientTrianglesClockwise(triangles2D);
-                    //From 2d to 3d
-                    HashSet<Triangle3> triangles3D = new HashSet<Triangle3>();
-
-                    foreach (Triangle2 t in triangles2D)
-                    {
-                        triangles3D.Add(new Triangle3(t.p1.ToVector3_Yis3D(), t.p2.ToVector3_Yis3D(), t.p3.ToVector3_Yis3D()));
-                    }
-
-                    Mesh meshArrayFront = TransformBetweenDataStructures.Triangle3ToCompressedMesh(triangles3D);
-
-                    //Mesh meshLower = new Mesh();
-                    Vector3[] verticesLower = new Vector3[meshArrayFront.vertices.Length];
-                    int[] trianglesLower = new int[meshArrayFront.triangles.Length];
-
-                    //Mesh meshUpper = new Mesh();
-                    Vector3[] verticesUpper = new Vector3[meshArrayFront.vertices.Length];
-                    int[] trianglesUpper = new int[meshArrayFront.triangles.Length];
-
-                    for (int k = 0; k < meshArrayFront.vertices.Length; k++)
-                    {
-                        verticesLower[k] = meshArrayFront.vertices[k];
-                        verticesUpper[k] = meshArrayFront.vertices[k] + new Vector3(0,extrusion,0);
-                    }
-
-                    for (int k = 0; k < meshArrayFront.triangles.Length; k+=3)
-                    {
-                        trianglesLower[k + 0] = meshArrayFront.triangles[k + 0];
-                        trianglesLower[k + 1] = meshArrayFront.triangles[k + 2];
-                        trianglesLower[k + 2] = meshArrayFront.triangles[k + 1];
-                    }
-
-                    trianglesUpper = meshArrayFront.triangles;
-
-                    combineInstance[branchNumberMesh + c].mesh = new Mesh();
-                    combineInstance[branchNumberMesh + c].mesh.vertices = verticesUpper;
-                    combineInstance[branchNumberMesh + c].mesh.triangles = trianglesUpper;
-                    combineInstance[branchNumberMesh + c].mesh.RecalculateNormals();
-                    combineInstance[branchNumberMesh + c].transform = localToWorldMatrix;
-
-                    combineInstance[branchNumberMesh + outerBranchNumber + c].mesh = new Mesh();
-                    combineInstance[branchNumberMesh + outerBranchNumber + c].mesh.vertices = verticesLower;
-                    combineInstance[branchNumberMesh + outerBranchNumber + c].mesh.triangles = trianglesLower;
-                    combineInstance[branchNumberMesh + outerBranchNumber + c].mesh.RecalculateNormals();
-                    combineInstance[branchNumberMesh + outerBranchNumber + c].transform = localToWorldMatrix;
-
-                    c++;
-                }
-            }
-        }
-
-        bool IsPointInsidePolygon(float3 point, Spline polygon)
-        {
-            int count = 0;
-            int numVertices = polygon.Count;
-
-            for (int i = 0, j = numVertices - 1; i < numVertices; j = i++)
-            {
-                if ((polygon[i].Position.z > point.z != polygon[j].Position.z > point.z) &&
-                    (point.x < (polygon[j].Position.x - polygon[i].Position.x) * (point.z - polygon[i].Position.z) / (polygon[j].Position.z - polygon[i].Position.z) + polygon[i].Position.x))
-                {
-                    count++;
                 }
             }
 
-            return count % 2 == 1;
-        }
-
-        void ReturnCounterClockWiseSpline(int i, bool isClockWise)
-        {
-            if (isClockWise)
+            foreach (var contour in contours)
             {
-                var branchNumber = m_Spline[i].Splines.Count;
-                for (int y = 0; y < branchNumber; y++)
+                bool counterClockwise = contour.signedArea > 0f;
+                if (counterClockwise == contour.isHole)
                 {
-                    List<BezierKnot> listSpline = new List<BezierKnot>();
-
-                    var counterBranch = m_Spline[i].Splines[y].Count;
-                    //read
-                    for (int z = 0; z < counterBranch; z++)
-                    {
-                        var bezierKnot = new BezierKnot(
-                            m_Spline[i].Splines[y][counterBranch - 1 - z].Position,
-                            m_Spline[i].Splines[y][counterBranch - 1 - z].TangentOut,
-                            m_Spline[i].Splines[y][counterBranch - 1 - z].TangentIn,
-                            quaternion.identity
-                        );
-                        listSpline.Add(bezierKnot);
-                    }
-                    //write
-                    for (int z = 0; z < counterBranch; z++)
-                    {
-                        m_Spline[i].Splines[y][z] = listSpline[z];
-                    }
-                    listSpline.Clear();
+                    ReverseSpline(contour.spline);
+                    contour.points = SampleSpline(contour.spline);
+                    contour.signedArea = SignedArea(contour.points);
                 }
             }
+
+            return contours;
         }
 
-        void CreateDetailedVerticesListWhenTangentsExist(int i, int j, int knotNumber, out List<float3> verticesList)
+        /// <summary>Flattens a spline: straight segments keep their knot, curved segments get m_CurveSegments points.</summary>
+        private List<Vector3> SampleSpline(Spline spline)
         {
-            verticesList = new List<float3>();
-            for (int k = 0; k < knotNumber; k++)
-            {
-                if (m_Spline[i].Splines[j][k].TangentOut.x != 0 ||
-                    m_Spline[i].Splines[j][k].TangentOut.y != 0 ||
-                    m_Spline[i].Splines[j][k].TangentOut.z != 0 ||
-                    m_Spline[i].Splines[j][TriangulationUtility.GetIndex(knotNumber, k + 1)].TangentIn.x != 0 ||
-                    m_Spline[i].Splines[j][TriangulationUtility.GetIndex(knotNumber, k + 1)].TangentIn.y != 0 ||
-                    m_Spline[i].Splines[j][TriangulationUtility.GetIndex(knotNumber, k + 1)].TangentIn.z != 0)
-                {
-                    BezierCurve curve = new BezierCurve(m_Spline[i].Splines[j][k], m_Spline[i].Splines[j][TriangulationUtility.GetIndex(knotNumber, k + 1)]);
+            int knotCount = spline.Count;
+            int segments = Mathf.Max(1, m_CurveSegments);
+            var points = new List<Vector3>(knotCount * segments);
 
-                    var div = 3;
-                    for (int w = 0; w < div; w++)
+            for (int k = 0; k < knotCount; k++)
+            {
+                var knot = spline[k];
+                var next = spline[TriangulationUtility.GetIndex(knotCount, k + 1)];
+
+                bool isCurve = !knot.TangentOut.Equals(float3.zero) || !next.TangentIn.Equals(float3.zero);
+                if (isCurve)
+                {
+                    var curve = new BezierCurve(knot, next);
+                    for (int w = 0; w < segments; w++)
                     {
-                        float t = (float) w / div;
-                        verticesList.Add(CurveUtility.EvaluatePosition(curve, t));
+                        float t = (float)w / segments;
+                        points.Add(CurveUtility.EvaluatePosition(curve, t));
                     }
                 }
                 else
                 {
-                    verticesList.Add(m_Spline[i].Splines[j][k].Position);
+                    points.Add(knot.Position);
                 }
             }
+            return points;
         }
 
-        void TriangulateLateralFaces(int extrusionNumber, int knotNumber)
+        /// <summary>Shoelace area on the XZ plane, treating (x, z) as 2D (x, y). Positive means counter-clockwise.</summary>
+        private static float SignedArea(List<Vector3> points)
         {
-            for (int i = 0; i < extrusionNumber - 1; i++)
+            double area = 0;
+            for (int i = 0, j = points.Count - 1; i < points.Count; j = i++)
             {
-                for (int j = 0; j < knotNumber; j++)
+                area += (double)points[j].x * points[i].z - (double)points[i].x * points[j].z;
+            }
+            return (float)(area * 0.5);
+        }
+
+        private static bool IsPointInsidePolygon(Vector3 point, List<Vector3> polygon)
+        {
+            bool inside = false;
+            for (int i = 0, j = polygon.Count - 1; i < polygon.Count; j = i++)
+            {
+                var a = polygon[i];
+                var b = polygon[j];
+                if ((a.z > point.z) != (b.z > point.z) &&
+                    point.x < (b.x - a.x) * (point.z - a.z) / (b.z - a.z) + a.x)
                 {
-                    var index = j * 6 + 0 + i * knotNumber * 6;
-
-                    triangles[index + 0] = j*2;
-                    triangles[index + 1] = j*2+knotNumber*2;
-                    triangles[index + 2] = j*2+knotNumber*2+1;
-
-                    triangles[index + 3] = j*2;
-                    triangles[index + 4] = j*2+knotNumber*2+1;
-                    triangles[index + 5] = j*2+1;
+                    inside = !inside;
                 }
+            }
+            return inside;
+        }
+
+        private static void ReverseSpline(Spline spline)
+        {
+            int count = spline.Count;
+            var reversed = new BezierKnot[count];
+            for (int z = 0; z < count; z++)
+            {
+                var source = spline[count - 1 - z];
+                reversed[z] = new BezierKnot(source.Position, source.TangentOut, source.TangentIn, quaternion.identity);
+            }
+            for (int z = 0; z < count; z++)
+            {
+                spline[z] = reversed[z];
             }
         }
 
-        int FindTotalTrianglesExtrusion(int knots)
+        // UVs are measured in em units, so a texture tiles the same way at every text size.
+        private float UVScale => Mathf.Abs(m_Size) > 1e-6f ? 1f / m_Size : 1f;
+
+        /// <summary>Side walls of one contour: a quad per edge, with its own vertices so edges stay sharp.</summary>
+        private Mesh BuildWalls(List<Vector3> points, float height)
         {
-            return knots * 2 * 3;
+            int n = points.Count;
+            var up = new Vector3(0f, height, 0f);
+            float uvScale = UVScale;
+
+            var verts = new Vector3[n * 4];
+            var uvs = new Vector2[n * 4];
+            var tris = new int[n * 6];
+
+            float distance = 0f;
+            for (int k = 0; k < n; k++)
+            {
+                var a = points[k];
+                var b = points[TriangulationUtility.GetIndex(n, k + 1)];
+                float nextDistance = distance + Vector3.Distance(a, b);
+
+                int index = k * 2;
+                verts[index] = a;
+                verts[index + 1] = b;
+                verts[index + 2 * n] = a + up;
+                verts[index + 1 + 2 * n] = b + up;
+
+                // U runs along the outline, V up the extrusion.
+                uvs[index] = new Vector2(distance * uvScale, 0f);
+                uvs[index + 1] = new Vector2(nextDistance * uvScale, 0f);
+                uvs[index + 2 * n] = new Vector2(distance * uvScale, height * uvScale);
+                uvs[index + 1 + 2 * n] = new Vector2(nextDistance * uvScale, height * uvScale);
+
+                int t = k * 6;
+                tris[t + 0] = index;
+                tris[t + 1] = index + 2 * n;
+                tris[t + 2] = index + 2 * n + 1;
+                tris[t + 3] = index;
+                tris[t + 4] = index + 2 * n + 1;
+                tris[t + 5] = index + 1;
+
+                distance = nextDistance;
+            }
+
+            var mesh = new Mesh { vertices = verts, uv = uvs, triangles = tris };
+            mesh.RecalculateNormals();
+            return mesh;
         }
 
-        private static int GetIndex(int indexLength, int index)
+        /// <summary>Triangulates one outline with its holes into a top cap (at y = height) and a bottom cap (y = 0).</summary>
+        private void BuildCaps(Contour outline, List<Contour> holes, float height, out Mesh top, out Mesh bottom)
         {
-            return index >= indexLength ? 0 : index;
+            List<Vector2> hullPoints2D = outline.points.Select(p => p.ToVector2()).ToList();
+
+            var allHolePoints2D = new HashSet<List<Vector2>>();
+            foreach (var hole in holes)
+            {
+                allHolePoints2D.Add(hole.points.Select(p => p.ToVector2()).ToList());
+            }
+
+            //Normalize to range 0-1, using all points including the holes
+            var allPoints = new List<Vector2>(hullPoints2D);
+            foreach (var hole in allHolePoints2D) allPoints.AddRange(hole);
+
+            var normalizer = new Normalizer2(allPoints);
+            var hullNormalized = normalizer.Normalize(hullPoints2D);
+            var holesNormalized = new HashSet<List<Vector2>>();
+            foreach (var hole in allHolePoints2D) holesNormalized.Add(normalizer.Normalize(hole));
+
+            //Constrained delaunay, then back to glyph space
+            HalfEdgeData2 triangleDataNormalized = Delaunay.ConstrainedBySloan(null, hullNormalized, holesNormalized, shouldRemoveTriangles: true, new HalfEdgeData2());
+            HalfEdgeData2 triangleData = normalizer.UnNormalize(triangleDataNormalized);
+            HashSet<Triangle2> triangles2D = HelpMethods.OrientTrianglesClockwise(TransformBetweenDataStructures.HalfEdge2ToTriangle2(triangleData));
+
+            var triangles3D = new HashSet<Triangle3>();
+            foreach (Triangle2 t in triangles2D)
+            {
+                triangles3D.Add(new Triangle3(t.p1.ToVector3_Yis3D(), t.p2.ToVector3_Yis3D(), t.p3.ToVector3_Yis3D()));
+            }
+
+            Mesh front = TransformBetweenDataStructures.Triangle3ToCompressedMesh(triangles3D);
+            var frontVertices = front.vertices;
+            var frontTriangles = front.triangles;
+            SafeDestroy(front);
+
+            float uvScale = UVScale;
+            var up = new Vector3(0f, height, 0f);
+            var verticesTop = new Vector3[frontVertices.Length];
+            var verticesBottom = new Vector3[frontVertices.Length];
+            var uvs = new Vector2[frontVertices.Length];
+            for (int k = 0; k < frontVertices.Length; k++)
+            {
+                verticesBottom[k] = frontVertices[k];
+                verticesTop[k] = frontVertices[k] + up;
+                uvs[k] = new Vector2(frontVertices[k].x, frontVertices[k].z) * uvScale; // planar mapping, em units
+            }
+
+            var trianglesBottom = new int[frontTriangles.Length];
+            for (int k = 0; k < frontTriangles.Length; k += 3)
+            {
+                trianglesBottom[k + 0] = frontTriangles[k + 0];
+                trianglesBottom[k + 1] = frontTriangles[k + 2];
+                trianglesBottom[k + 2] = frontTriangles[k + 1];
+            }
+
+            top = new Mesh { vertices = verticesTop, uv = uvs, triangles = frontTriangles };
+            top.RecalculateNormals();
+
+            bottom = new Mesh { vertices = verticesBottom, uv = uvs, triangles = trianglesBottom };
+            bottom.RecalculateNormals();
+        }
+
+        /// <summary>Merges the parts into one mesh with normals and tangents, and frees the temporary parts.</summary>
+        private static Mesh Combine(List<Mesh> parts, string name, bool recalculateNormals)
+        {
+            var instances = new CombineInstance[parts.Count];
+            int vertexCount = 0;
+            for (int k = 0; k < parts.Count; k++)
+            {
+                instances[k].mesh = parts[k];
+                instances[k].transform = Matrix4x4.identity;
+                vertexCount += parts[k].vertexCount;
+            }
+
+            var combined = new Mesh { name = name };
+            if (vertexCount > 65535)
+            {
+                combined.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
+            }
+            combined.CombineMeshes(instances, true);
+            if (recalculateNormals)
+            {
+                combined.RecalculateNormals();
+            }
+            combined.RecalculateTangents();
+
+            foreach (var part in parts) SafeDestroy(part);
+            return combined;
         }
     }
 }
