@@ -5,8 +5,10 @@ using UnityEngine.Splines;
 using Typography.OpenFont;
 using System.IO;
 using System.Linq;
-using UnityEditor;
 using UnityEngine;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 namespace Softgraph.TextMesh3D.Runtime
 {
@@ -64,6 +66,80 @@ namespace Softgraph.TextMesh3D.Runtime
 
         [SerializeField][HideInInspector] private GameObject myText;
 
+        // Raw bytes of m_Font's source file (.ttf/.otf). Unity's Font asset does not expose the
+        // original file at runtime, so the editor caches it here to make generation work in builds.
+        [SerializeField][HideInInspector] private byte[] m_FontData;
+        [SerializeField][HideInInspector] private string m_FontDataSource;
+
+#if UNITY_EDITOR
+        private void OnValidate()
+        {
+            CacheFontData();
+        }
+
+        /// <summary>Editor only: reads the font file behind m_Font into m_FontData when the font changes.</summary>
+        public void CacheFontData()
+        {
+            var path = m_Font != null ? AssetDatabase.GetAssetPath(m_Font) : null;
+
+            if (string.IsNullOrEmpty(path))
+            {
+                if (m_FontData != null)
+                {
+                    m_FontData = null;
+                    m_FontDataSource = null;
+                    MarkDirty();
+                }
+                return;
+            }
+
+            if (m_FontData != null && m_FontData.Length > 0 && m_FontDataSource == path)
+                return;
+
+            var fullPath = Path.GetFullPath(path); // resolves Packages/... to the real location
+            if (!File.Exists(fullPath))
+            {
+                Debug.LogError($"TextMesh3D: font file not found at '{path}'.", this);
+                return;
+            }
+
+            m_FontData = File.ReadAllBytes(fullPath);
+            m_FontDataSource = path;
+            MarkDirty();
+        }
+
+        private void MarkDirty()
+        {
+            if (!Application.isPlaying)
+                EditorUtility.SetDirty(this);
+        }
+#endif
+
+        private Typeface LoadTypeface()
+        {
+#if UNITY_EDITOR
+            CacheFontData();
+#endif
+            if (m_FontData == null || m_FontData.Length == 0)
+            {
+                Debug.LogError("TextMesh3D: no font data. Assign a .ttf/.otf font in the editor before generating.", this);
+                return null;
+            }
+
+            using (var stream = new MemoryStream(m_FontData, false))
+            {
+                return new OpenFontReader().Read(stream);
+            }
+        }
+
+        // DestroyImmediate is only valid in edit mode; use Destroy while playing.
+        private static void SafeDestroy(UnityEngine.Object obj)
+        {
+            if (obj == null) return;
+            if (Application.isPlaying) Destroy(obj);
+            else DestroyImmediate(obj);
+        }
+
         public void Function()
         {
             switch (m_Output)
@@ -80,22 +156,15 @@ namespace Softgraph.TextMesh3D.Runtime
             }
         }
 
-        private void DoSpline()
+        private bool DoSpline()
         {
-            var fontName = m_Font.name;
-            if (myText) DestroyImmediate(myText);
+            Typeface typeface = LoadTypeface();
+            if (typeface == null) return false;
+
+            var fontName = m_Font != null ? m_Font.name : "TextMesh3D";
+            if (myText) SafeDestroy(myText);
             myText = new GameObject(fontName);
             myText.transform.SetParent(transform, false);
-
-            Debug.Log(AssetDatabase.GetAssetPath(m_Font));
-            Debug.Log(AssetDatabase.GetAssetPath(m_Material));
-
-            Typeface typeface;
-            using (FileStream fileStream = new FileStream(AssetDatabase.GetAssetPath(m_Font), FileMode.Open, FileAccess.Read))
-            {
-                var reader = new OpenFontReader();
-                typeface = reader.Read(fileStream);
-            }
 
             objToSpawn = new GameObject[m_Text.Length];
             m_Spline = new SplineContainer[m_Text.Length];
@@ -140,11 +209,12 @@ namespace Softgraph.TextMesh3D.Runtime
                     advanceWidth.x += glyph.Bounds.XMax * scale + m_Spacing;
                 }
             }
+            return true;
         }
 
         private void DoSurface()
         {
-            DoSpline();
+            if (!DoSpline()) return;
 
             for (int i = 0; i < objToSpawn.Length; i++)
             {
@@ -208,20 +278,20 @@ namespace Softgraph.TextMesh3D.Runtime
 
                 DoFillMesh(branchNumber, listHolesBool, outerBranchNumber, localToWorldMatrix, 0, 0);
 
-                DestroyImmediate(empty);
+                SafeDestroy(empty);
 
                 Mesh combinedMesh = new Mesh();
                 combinedMesh.name = objToSpawn[i].name;
                 combinedMesh.CombineMeshes(combineInstance, true);
                 objToSpawn[i].GetComponent<MeshFilter>().mesh = combinedMesh;
 
-                DestroyImmediate(objToSpawn[i].GetComponent<SplineContainer>());
+                SafeDestroy(objToSpawn[i].GetComponent<SplineContainer>());
             }
         }
 
         private void DoMesh()
         {
-            DoSpline();
+            if (!DoSpline()) return;
 
             //Run for every string character and continue for empty spaces
             for (int i = 0; i < objToSpawn.Length; i++)
@@ -293,7 +363,7 @@ namespace Softgraph.TextMesh3D.Runtime
 
                 DoFillMesh(branchNumber, listHolesBool, outerBranchNumber, localToWorldMatrix, m_Extrusion, branchNumber);
 
-                DestroyImmediate(empty);
+                SafeDestroy(empty);
 
                 Mesh combinedMesh = new Mesh();
                 combinedMesh.name = objToSpawn[i].name;
@@ -301,7 +371,7 @@ namespace Softgraph.TextMesh3D.Runtime
                 combinedMesh.RecalculateNormals();
                 objToSpawn[i].GetComponent<MeshFilter>().mesh = combinedMesh;
 
-                DestroyImmediate(objToSpawn[i].GetComponent<SplineContainer>());
+                SafeDestroy(objToSpawn[i].GetComponent<SplineContainer>());
             }
         }
 
