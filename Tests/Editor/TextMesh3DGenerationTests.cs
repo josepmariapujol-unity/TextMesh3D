@@ -20,9 +20,9 @@ namespace Softgraph.TextMesh3D.Tests
 
         readonly List<TextMesh3DContainer> m_Created = new List<TextMesh3DContainer>();
 
-        TextMesh3DContainer Create(string text, TextMesh3DContainer.OutputMode mode, float extrusion = 1f, float size = 1f, float spacing = 0f, Font font = null, int curveSegments = 3)
+        TextMesh3DContainer Create(string text, TextMesh3DContainer.OutputMode mode, float extrusion = 1f, float size = 1f, float spacing = 0f, Font font = null, int curveSegments = 3, bool kerning = true)
         {
-            var c = CreateContainer(text, mode, extrusion, size, spacing, font, curveSegments);
+            var c = CreateContainer(text, mode, extrusion, size, spacing, font, curveSegments, kerning);
             m_Created.Add(c);
             return c;
         }
@@ -171,7 +171,8 @@ namespace Softgraph.TextMesh3D.Tests
             const float size = 3f;
             var path = FontPath(fontFile);
             var typeface = LoadTypeface(path);
-            var glyphs = Generate(Create(text, TextMesh3DContainer.OutputMode.Spline, size: size, font: LoadFont(path)));
+            // Kerning off: this test checks the plain advance widths (kerning has its own tests)
+            var glyphs = Generate(Create(text, TextMesh3DContainer.OutputMode.Spline, size: size, font: LoadFont(path), kerning: false));
 
             float scale = size / typeface.UnitsPerEm;
             float expectedX = 0f;
@@ -324,7 +325,7 @@ namespace Softgraph.TextMesh3D.Tests
         {
             const float size = 2f;
             var typeface = LoadTypeface(RobotoPath);
-            var glyphs = Generate(Create("A B", TextMesh3DContainer.OutputMode.Spline, size: size));
+            var glyphs = Generate(Create("A B", TextMesh3DContainer.OutputMode.Spline, size: size, kerning: false));
 
             float scale = size / typeface.UnitsPerEm;
             float spaceAdvance = typeface.GetAdvanceWidthFromGlyphIndex(typeface.GetGlyphIndex(' ')) * scale;

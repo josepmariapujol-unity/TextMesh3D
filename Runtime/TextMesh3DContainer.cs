@@ -55,6 +55,9 @@ namespace Softgraph.TextMesh3D.Runtime
         [SerializeField, Tooltip("Extra space added after every character, in Unity units (can be negative).")]
         private float m_Spacing;
 
+        [SerializeField, Tooltip("Apply the font's kerning, e.g. tighter \"AV\" and \"To\" pairs.")]
+        private bool m_Kerning = true;
+
         [SerializeField, Tooltip("Surface/Mesh only: merge all glyphs into one mesh on this object instead of one child object per glyph.")]
         private bool m_GroupOutput;
 
@@ -74,6 +77,7 @@ namespace Softgraph.TextMesh3D.Runtime
         public float Size { get => m_Size; set => m_Size = value; }
         public Material Material { get => m_Material; set => m_Material = value; }
         public float Spacing { get => m_Spacing; set => m_Spacing = value; }
+        public bool Kerning { get => m_Kerning; set => m_Kerning = value; }
         public bool GroupOutput { get => m_GroupOutput; set => m_GroupOutput = value; }
         public int CurveSegments { get => m_CurveSegments; set => m_CurveSegments = value; }
 
@@ -234,6 +238,10 @@ namespace Softgraph.TextMesh3D.Runtime
             var spaceAdvance = GetAdvanceWidth(typeface, typeface.GetGlyphIndex(' ')) * scale;
             var missing = new List<char>();
 
+            var kerning = m_Kerning ? new GlyphKerning(typeface, m_FontData) : null;
+            int previousGlyph = -1;   // glyph index of the previous character, -1 when the run was broken
+            int previousObject = -1;  // its index in m_GlyphObjects
+
             for (int i = 0; i < m_GlyphObjects.Length; i++)
             {
                 char ch = m_Text[i];
@@ -252,15 +260,18 @@ namespace Softgraph.TextMesh3D.Runtime
                 {
                     pen.x = 0f;
                     pen.z -= lineHeight;
+                    previousGlyph = -1; // no kerning across lines
                     continue;
                 }
                 if (ch == '\t')
                 {
                     pen.x += 4f * spaceAdvance + m_Spacing;
+                    previousGlyph = -1;
                     continue;
                 }
                 if (char.IsControl(ch) || char.IsSurrogate(ch))
                 {
+                    previousGlyph = -1;
                     continue;
                 }
 
@@ -270,13 +281,31 @@ namespace Softgraph.TextMesh3D.Runtime
                     missing.Add(ch); // still drawn as the font's "missing glyph" (.notdef) shape
                 }
 
+                //Kerning: adjust the previous glyph's advance (and any placement offsets) for this pair, e.g. "AV", "To"
+                var offset = Vector3.zero;
+                float extraAdvance = 0f;
+                if (kerning != null && previousGlyph >= 0)
+                {
+                    var pair = kerning.GetAdjustment((ushort)previousGlyph, glyphIndex);
+                    if (!pair.IsZero)
+                    {
+                        pen.x += pair.FirstAdvance * scale;
+                        m_GlyphObjects[previousObject].transform.localPosition += new Vector3(pair.FirstOffsetX * scale, 0f, pair.FirstOffsetY * scale);
+                        offset = new Vector3(pair.SecondOffsetX * scale, 0f, pair.SecondOffsetY * scale);
+                        extraAdvance = pair.SecondAdvance * scale;
+                    }
+                }
+                m_GlyphObjects[i].transform.localPosition = new Vector3(pen.x, pen.y, pen.z) + offset;
+
                 Glyph glyph = typeface.GetGlyph(glyphIndex);
                 GlyphSplineReader glyphSplineReader = new GlyphSplineReader(container);
                 glyphSplineReader.Read(glyph, scale);
 
                 //Move the pen by the font's advance width.
                 //The advance includes the side bearings, so it works for narrow glyphs and spaces alike.
-                pen.x += GetAdvanceWidth(typeface, glyphIndex) * scale + m_Spacing;
+                pen.x += GetAdvanceWidth(typeface, glyphIndex) * scale + m_Spacing + extraAdvance;
+                previousGlyph = glyphIndex;
+                previousObject = i;
             }
 
             if (missing.Count > 0)

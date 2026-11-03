@@ -14,6 +14,7 @@ namespace Softgraph.TextMesh3D.Editor
         SerializedProperty m_Extrusion;
         SerializedProperty m_Material;
         SerializedProperty m_Spacing;
+        SerializedProperty m_Kerning;
         SerializedProperty m_GroupOutput;
         SerializedProperty m_Size;
         SerializedProperty m_CurveSegments;
@@ -36,6 +37,7 @@ namespace Softgraph.TextMesh3D.Editor
             m_Extrusion = serializedObject.FindProperty("m_Extrusion");
             m_Material = serializedObject.FindProperty("m_Material");
             m_Spacing = serializedObject.FindProperty("m_Spacing");
+            m_Kerning = serializedObject.FindProperty("m_Kerning");
             m_GroupOutput = serializedObject.FindProperty("m_GroupOutput");
             m_Size = serializedObject.FindProperty("m_Size");
             m_CurveSegments = serializedObject.FindProperty("m_CurveSegments");
@@ -64,6 +66,7 @@ namespace Softgraph.TextMesh3D.Editor
             if(showInfo)
             {
                 EditorGUILayout.PropertyField(m_Spacing, new GUIContent(k_Spacing));
+                EditorGUILayout.PropertyField(m_Kerning, new GUIContent("Kerning"));
                 if (m_Output.enumValueIndex != 0) // Surface / Mesh only
                 {
                     EditorGUILayout.PropertyField(m_GroupOutput, new GUIContent(k_GroupOutput));

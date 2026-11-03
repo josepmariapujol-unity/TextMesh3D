@@ -39,11 +39,13 @@ namespace Softgraph.TextMesh3D.Tests
             float size = 1f,
             float spacing = 0f,
             Font font = null,
-            int curveSegments = 3)
+            int curveSegments = 3,
+            bool kerning = true)
         {
             var go = new GameObject("TextMesh3D Test");
             var container = go.AddComponent<TextMesh3DContainer>();
             container.CurveSegments = curveSegments;
+            container.Kerning = kerning;
             container.Text = text;
             container.Font = font != null ? font : LoadRoboto();
             container.Output = mode;
