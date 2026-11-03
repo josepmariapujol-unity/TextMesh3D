@@ -3,8 +3,6 @@
     "rootNamespace": "Softgraph.TextMesh3D.Runtime",
     "references": [
         "GUID:21d1eb854b91ade49bc69a263d12bee2",
-        "GUID:2665a8d13d1b3f18800f46e256720795",
-        "GUID:2bafac87e7f4b9b418d9448d219b01ab",
         "GUID:d8b63aba1907145bea998dd612889d6b"
     ],
     "includePlatforms": [],

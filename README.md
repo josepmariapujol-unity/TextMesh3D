@@ -1,24 +1,86 @@
 # TextMesh3D
 
-Convert Fonts into 3D Meshes or Splines
+Convert fonts into 3D meshes, flat surfaces or splines in Unity.
 
-TextMesh3D is a powerful utility for converting any font file (.ttf or .otf) into editable 3D meshes or spline-based contours directly within Unity. Whether you’re building stylized 3D titles, procedural typography, or text-driven, TextMesh3D gives you full control over how fonts are rendered in 3D space.
+TextMesh3D reads TrueType (`.ttf`) and OpenType (`.otf`) fonts and turns text into geometry built from the real glyph outlines: extruded solid letters, flat filled shapes, or editable spline contours.
 
 ## Features
-* Supports TrueType (.ttf) and OpenType (.otf) fonts
-* Converts text into clean 3D mesh geometry
-* Optionally generate spline contours for procedural workflows
-* Ideal for signage, text extrusion, and custom geometry generation
-* Runtime and editor support for dynamic text updates
 
-Perfect for games, interactive experiences, and tools needing rich 3D text capabilities.
+- **Three outputs:** Mesh (extruded solids with side walls), Surface (flat, double-sided), Spline (one closed spline per glyph contour, using Unity Splines)
+- **Correct typography:** font advance widths, kerning (OpenType GPOS and legacy `kern` table), line breaks (`\n`) and tabs
+- **Font-independent sizing:** `Size` is the em size in Unity units, so text has the same size in every font
+- **Ready for rendering:** UVs (in em units) and tangents, so textured and normal-mapped materials work
+- **Group Output:** merge the whole text into one mesh on the object (one draw call)
+- **Adjustable curve quality:** Curve Segments sets how finely curves are flattened
+- **Editor friendly:** one Undo step per Apply, multi-object editing, a TextMesh3D window that follows the selection
+- **Works in player builds:** the font is stored with the object when you assign it in the editor
 
-## Third-party Software
+## Requirements
 
-This package contains third-party software components governed by the license(s) indicated below:
+- Unity 2022.3 or newer
+- Unity Splines 2.8.1 or newer (installed automatically)
 
-Component Name: [provide component name]
+## Getting started
 
-License Type: MIT
+1. **GameObject > 3D Object > Text - TextMesh3D.** This creates "New Text" with the default font (Roboto) and material.
+2. In the inspector, edit the text, font, output and size, then press **Apply**.
+3. Optional: **Window > TextMesh3D** edits the selected text in a separate window.
 
-[Provide License Details]
+### From code
+
+```csharp
+using Softgraph.TextMesh3D.Runtime;
+
+[SerializeField] TextMesh3DContainer label;   // set up in the editor
+
+void SetScore(int score)
+{
+    label.Text = $"Score {score}";
+    label.Generate();
+}
+```
+
+Import **TextMesh3D Examples** from the Package Manager (Samples tab) for a complete example.
+
+## Settings
+
+| Setting | Description |
+|---|---|
+| Text | The text. Supports `\n` (new line) and `\t` (4 spaces). |
+| Font | A `.ttf` or `.otf` font asset. |
+| Output | Spline, Surface or Mesh. |
+| Size | Em size in Unity units (capital letters are about 0.7 × Size tall). |
+| Extrusion | Mesh only: depth of the letters. |
+| Material | Surface/Mesh: material for the generated meshes. |
+| Spacing *(Advanced)* | Extra space after every character, in Unity units. |
+| Kerning *(Advanced)* | Apply the font's kerning (on by default). |
+| Group Output *(Advanced)* | Surface/Mesh: one merged mesh on this object instead of one child per character. |
+| Curve Segments *(Advanced)* | Surface/Mesh: points per curved outline segment (1–32, default 3). |
+
+## Notes and limitations
+
+- Text is laid out on the XZ plane (lying flat) and extruded along +Y. Rotate the object to stand it up.
+- Text created entirely from code in a player build has no font data; set up the object in the editor and change its text at runtime instead.
+- Characters missing from the font are drawn as the font's "missing glyph" shape and reported in the console.
+- Right-to-left scripts, ligatures and complex shaping are not supported.
+
+## Upgrading from 2.x
+
+See [CHANGELOG.md](CHANGELOG.md). In short: `Enum` is now `OutputMode`, `Function()` is now `Generate()`, settings are properties (`Text`, `Font`, …) instead of public fields, and `Size` is now the em size (multiply old values by about 20 to keep the same size with 2048-unit fonts).
+
+## Third-party software
+
+This package includes third-party components:
+
+| Component | License |
+|---|---|
+| [Typography.OpenFont](https://github.com/LayoutFarm/Typography) (font parsing) | Apache License 2.0 |
+| System.Numerics.Vectors (.NET, dependency of Typography) | MIT |
+| [Habrador Computational Geometry Library](https://github.com/Habrador/Computational-geometry) (triangulation, modified) | MIT |
+| [Roboto](https://github.com/googlefonts/roboto) font | Apache License 2.0 |
+
+Full license texts and copyright notices are in [Third Party Notices.md](Third%20Party%20Notices.md).
+
+## License
+
+TextMesh3D is released under the MIT License, see [LICENSE.md](LICENSE.md).

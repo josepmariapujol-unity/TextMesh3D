@@ -1,25 +1,31 @@
 {
   "name": "com.softgraph.textmesh3d",
   "displayName": "TextMesh3D",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "unity": "2022.3",
-  "description": "Convert Fonts into 3D Meshes or Splines",
+  "description": "Convert TrueType and OpenType fonts into 3D meshes, flat surfaces or splines, with kerning, line breaks and undo support.",
+  "author": {
+    "name": "Softgraph"
+  },
+  "license": "MIT",
   "dependencies": {
     "com.unity.splines": "2.8.1",
-    "com.unity.burst": "1.8.10"
+    "com.unity.mathematics": "1.2.1"
   },
   "samples": [
     {
       "displayName": "TextMesh3D Examples",
-      "description": "Example scenes showing how to use TextMesh3D.",
-      "path": "Samples~/"
+      "description": "Scripts showing how to update and create TextMesh3D text from code.",
+      "path": "Samples~/Examples"
     }
   ],
   "keywords": [
     "text",
     "mesh",
     "3d",
-    "font"
+    "font",
+    "extrude",
+    "spline"
   ],
   "category": "Tool",
   "type": "tool"
