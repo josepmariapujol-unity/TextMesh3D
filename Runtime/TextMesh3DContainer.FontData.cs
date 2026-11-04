@@ -64,6 +64,25 @@ namespace Softgraph.TextMesh3D.Runtime
         }
 #endif
 
+        // Parsed font, reused across Generate() calls. Keyed on the m_FontData array itself: assigning a new font,
+        // Undo/Redo and domain reloads all produce a new array, so a stale typeface can never be used.
+        [NonSerialized] private Typeface m_Typeface;
+        [NonSerialized] private byte[] m_TypefaceSource;
+        [NonSerialized] private GlyphKerning m_TypefaceKerning;
+
+        /// <summary>Number of times the font file was parsed (for tests and diagnostics).</summary>
+        internal int TypefaceParseCount { get; private set; }
+
+        /// <summary>Kerning for the cached typeface (built once per font, pair lookups are cached inside).</summary>
+        private GlyphKerning GetKerning(Typeface typeface)
+        {
+            if (m_TypefaceKerning == null || !ReferenceEquals(typeface, m_Typeface))
+            {
+                m_TypefaceKerning = new GlyphKerning(typeface, m_FontData);
+            }
+            return m_TypefaceKerning;
+        }
+
         private Typeface LoadTypeface()
         {
 #if UNITY_EDITOR
@@ -71,10 +90,36 @@ namespace Softgraph.TextMesh3D.Runtime
 #endif
             if (m_FontData == null || m_FontData.Length == 0)
             {
+                ClearTypefaceCache();
                 Debug.LogError("TextMesh3D: no font data. Assign a .ttf/.otf font in the editor before generating.", this);
                 return null;
             }
 
+            if (m_Typeface != null && ReferenceEquals(m_TypefaceSource, m_FontData))
+            {
+                return m_Typeface;
+            }
+
+            ClearTypefaceCache();
+            var typeface = ParseTypeface();
+            if (typeface != null)
+            {
+                m_Typeface = typeface;
+                m_TypefaceSource = m_FontData;
+            }
+            return typeface;
+        }
+
+        private void ClearTypefaceCache()
+        {
+            m_Typeface = null;
+            m_TypefaceSource = null;
+            m_TypefaceKerning = null;
+        }
+
+        private Typeface ParseTypeface()
+        {
+            TypefaceParseCount++;
             Typeface typeface = null;
             try
             {

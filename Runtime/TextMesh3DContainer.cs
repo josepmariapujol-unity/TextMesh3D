@@ -238,7 +238,7 @@ namespace Softgraph.TextMesh3D.Runtime
             var spaceAdvance = GetAdvanceWidth(typeface, typeface.GetGlyphIndex(' ')) * scale;
             var missing = new List<char>();
 
-            var kerning = m_Kerning ? new GlyphKerning(typeface, m_FontData) : null;
+            var kerning = m_Kerning ? GetKerning(typeface) : null;
             int previousGlyph = -1;   // glyph index of the previous character, -1 when the run was broken
             int previousObject = -1;  // its index in m_GlyphObjects
 

@@ -33,6 +33,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
 - The create menu could crash when the default material was not found, ignored the scene-view placement preference and picked up project assets with the same name.
 
 ### Changed
+- The font file is parsed once per object and reused by later `Generate()` calls (also the kerning tables and pair lookups).
 - Default font for new text is Roboto.
 - Core folders renamed (no numbers or spaces); `TextMesh3DContainer` split into partial files.
 
