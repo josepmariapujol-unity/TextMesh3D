@@ -81,34 +81,34 @@ namespace Softgraph.TextMesh3D.Editor
             EditorGUILayout.LabelField("Editing", targetContainer.name, EditorStyles.boldLabel);
             serializedObject.Update();
 
-            EditorGUILayout.PropertyField(m_Text, new GUIContent("Text"));
-            EditorGUILayout.PropertyField(m_Font, new GUIContent("Font"));
-            EditorGUILayout.PropertyField(m_Output, new GUIContent("Output"));
-            EditorGUILayout.PropertyField(m_Plane, new GUIContent("Plane"));
+            EditorGUILayout.PropertyField(m_Text);
+            EditorGUILayout.PropertyField(m_Font);
+            EditorGUILayout.PropertyField(m_Output);
+            EditorGUILayout.PropertyField(m_Plane);
 
-            EditorGUILayout.PropertyField(m_Size, new GUIContent("Font Size"));
+            EditorGUILayout.PropertyField(m_Size);
 
             if (m_Output.enumValueIndex != 0)
             {
-                EditorGUILayout.PropertyField(m_Material, new GUIContent("Material"));
+                EditorGUILayout.PropertyField(m_Material);
             }
 
             if (m_Output.enumValueIndex == 2)
             {
-                EditorGUILayout.PropertyField(m_Extrusion, new GUIContent("Extrusion"));
+                EditorGUILayout.PropertyField(m_Extrusion);
             }
 
             showInfo = EditorGUILayout.Foldout(showInfo, "Advanced");
 
             if (showInfo)
             {
-                EditorGUILayout.PropertyField(m_Spacing, new GUIContent("Spacing"));
-                EditorGUILayout.PropertyField(m_LineSpacing, new GUIContent("Line Spacing"));
-                EditorGUILayout.PropertyField(m_Kerning, new GUIContent("Kerning"));
+                EditorGUILayout.PropertyField(m_Spacing);
+                EditorGUILayout.PropertyField(m_LineSpacing);
+                EditorGUILayout.PropertyField(m_Kerning);
                 if (m_Output.enumValueIndex != 0) // Surface / Mesh only
                 {
-                    EditorGUILayout.PropertyField(m_GroupOutput, new GUIContent("Group Output"));
-                    EditorGUILayout.PropertyField(m_CurveSegments, new GUIContent("Curve Segments"));
+                    EditorGUILayout.PropertyField(m_GroupOutput);
+                    EditorGUILayout.PropertyField(m_CurveSegments);
                 }
             }
 

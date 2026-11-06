@@ -58,7 +58,7 @@ namespace Softgraph.TextMesh3D.Runtime
         [SerializeField, Min(0.0001f), Tooltip("Em size in Unity units. Same visual size for every font, regardless of its UnitsPerEm.")]
         private float m_Size;
 
-        [SerializeField]
+        [SerializeField, Tooltip("Surface/Mesh only: material for the generated meshes.")]
         private Material m_Material;
 
         [SerializeField, Tooltip("Extra space added after every character, in Unity units (can be negative).")]
@@ -168,7 +168,7 @@ namespace Softgraph.TextMesh3D.Runtime
         {
             if (!(m_Size > 0f) || float.IsInfinity(m_Size))
             {
-                Debug.LogError($"TextMesh3D: Font Size must be greater than 0 (is {m_Size}).", this);
+                Debug.LogError($"TextMesh3D: Size must be greater than 0 (is {m_Size}).", this);
                 return false;
             }
             if (!(m_Extrusion >= 0f) || float.IsInfinity(m_Extrusion))

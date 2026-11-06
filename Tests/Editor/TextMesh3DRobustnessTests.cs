@@ -58,7 +58,7 @@ namespace Softgraph.TextMesh3D.Tests
             Generate(container);
 
             container.Size = size;
-            LogAssert.Expect(LogType.Error, new Regex("Font Size must be greater than 0"));
+            LogAssert.Expect(LogType.Error, new Regex("Size must be greater than 0"));
             container.Generate();
 
             Assert.AreEqual(1, container.transform.childCount);
