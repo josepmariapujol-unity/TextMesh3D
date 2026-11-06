@@ -11,6 +11,7 @@ TextMesh3D reads TrueType (`.ttf`) and OpenType (`.otf`) fonts and turns text in
 - **Font-independent sizing:** `Size` is the em size in Unity units, so text has the same size in every font
 - **Ready for rendering:** UVs (in em units) and tangents, so textured and normal-mapped materials work
 - **Group Output:** merge the whole text into one mesh on the object (one draw call)
+- **Flat or upright:** lay text out on the XZ plane or stand it up on XY
 - **Adjustable curve quality:** Curve Segments sets how finely curves are flattened
 - **Editor friendly:** one Undo step per Apply, multi-object editing, a TextMesh3D window that follows the selection
 - **Works in player builds:** the font is stored with the object when you assign it in the editor
@@ -60,17 +61,19 @@ Import **TextMesh3D Examples** from the Package Manager (Samples tab) for a comp
 | Text | The text. Supports `\n` (new line) and `\t` (4 spaces). |
 | Font | A `.ttf` or `.otf` font asset. |
 | Output | Spline, Surface or Mesh. |
+| Plane | XZ: lying flat, extruded up (+Y). XY: standing up facing -Z (towards the default camera), extruded back along +Z. |
 | Size | Em size in Unity units (capital letters are about 0.7 × Size tall). |
 | Extrusion | Mesh only: depth of the letters. |
 | Material | Surface/Mesh: material for the generated meshes. |
 | Spacing *(Advanced)* | Extra space after every character, in Unity units. |
+| Line Spacing *(Advanced)* | Distance between lines as a multiple of the font's line height (default 1). |
 | Kerning *(Advanced)* | Apply the font's kerning (on by default). |
 | Group Output *(Advanced)* | Surface/Mesh: one merged mesh on this object instead of one child per character. |
 | Curve Segments *(Advanced)* | Surface/Mesh: points per curved outline segment (1–32, default 3). |
 
 ## Notes and limitations
 
-- Text is laid out on the XZ plane (lying flat) and extruded along +Y. Rotate the object to stand it up.
+- Text is laid out on the XZ plane (lying flat, extruded along +Y) by default. Set **Plane** to XY to stand it up: the front face is at z = 0 and the depth goes back along +Z.
 - Text created entirely from code in a player build has no font data; set up the object in the editor and change its text at runtime instead.
 - Characters missing from the font are drawn as the font's "missing glyph" shape and reported in the console.
 - Right-to-left scripts, ligatures and complex shaping are not supported.

@@ -18,6 +18,8 @@ namespace Softgraph.TextMesh3D.Editor
         private SerializedProperty m_GroupOutput;
         private SerializedProperty m_Size;
         private SerializedProperty m_CurveSegments;
+        private SerializedProperty m_Plane;
+        private SerializedProperty m_LineSpacing;
 
         private TextMesh3DContainer targetContainer;
 
@@ -59,6 +61,8 @@ namespace Softgraph.TextMesh3D.Editor
             m_GroupOutput = serializedObject.FindProperty("m_GroupOutput");
             m_Size = serializedObject.FindProperty("m_Size");
             m_CurveSegments = serializedObject.FindProperty("m_CurveSegments");
+            m_Plane = serializedObject.FindProperty("m_Plane");
+            m_LineSpacing = serializedObject.FindProperty("m_LineSpacing");
         }
 
         private void OnGUI()
@@ -80,6 +84,7 @@ namespace Softgraph.TextMesh3D.Editor
             EditorGUILayout.PropertyField(m_Text, new GUIContent("Text"));
             EditorGUILayout.PropertyField(m_Font, new GUIContent("Font"));
             EditorGUILayout.PropertyField(m_Output, new GUIContent("Output"));
+            EditorGUILayout.PropertyField(m_Plane, new GUIContent("Plane"));
 
             EditorGUILayout.PropertyField(m_Size, new GUIContent("Font Size"));
 
@@ -98,6 +103,7 @@ namespace Softgraph.TextMesh3D.Editor
             if (showInfo)
             {
                 EditorGUILayout.PropertyField(m_Spacing, new GUIContent("Spacing"));
+                EditorGUILayout.PropertyField(m_LineSpacing, new GUIContent("Line Spacing"));
                 EditorGUILayout.PropertyField(m_Kerning, new GUIContent("Kerning"));
                 if (m_Output.enumValueIndex != 0) // Surface / Mesh only
                 {

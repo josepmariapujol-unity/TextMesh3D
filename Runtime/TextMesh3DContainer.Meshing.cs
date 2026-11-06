@@ -107,6 +107,7 @@ namespace Softgraph.TextMesh3D.Runtime
             var glyphMeshes = new List<Mesh>();
             var instances = new List<CombineInstance>();
             int vertexCount = 0;
+            var plane = GetPlaneMatrix(); // the grouped mesh has no root object to carry the orientation
 
             for (int i = 0; i < m_GlyphObjects.Length; i++)
             {
@@ -118,7 +119,7 @@ namespace Softgraph.TextMesh3D.Runtime
                 instances.Add(new CombineInstance
                 {
                     mesh = filter.sharedMesh,
-                    transform = Matrix4x4.Translate(m_GlyphObjects[i].transform.localPosition),
+                    transform = plane * Matrix4x4.Translate(m_GlyphObjects[i].transform.localPosition),
                 });
             }
 

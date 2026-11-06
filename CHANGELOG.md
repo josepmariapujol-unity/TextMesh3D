@@ -14,6 +14,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
 ### Added
 - Kerning from the OpenType GPOS `kern` feature, with the legacy `kern` table as fallback (Kerning setting, on by default).
 - Line breaks (`\n`) and tabs (`\t`); other control characters take no space.
+- Line Spacing setting: distance between lines as a multiple of the font's line height.
+- Plane setting: XZ (lying flat, the previous behavior and default) or XY (standing up, facing -Z, extruded back along +Z). Works with Group Output and Save as Prefab.
 - Group Output: merges all glyphs into one mesh on the object.
 - Curve Segments setting for curve quality.
 - UVs (em units) and tangents on generated meshes.

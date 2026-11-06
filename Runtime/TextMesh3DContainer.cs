@@ -33,6 +33,15 @@ namespace Softgraph.TextMesh3D.Runtime
             Mesh
         }
 
+        /// <summary>The plane the text is laid out on.</summary>
+        public enum TextPlane
+        {
+            /// <summary>Lying flat on the XZ plane, extruded up along +Y.</summary>
+            XZ,
+            /// <summary>Standing up on the XY plane, facing -Z (the default camera direction), extruded back along +Z.</summary>
+            XY
+        }
+
         // Serialized names (m_*) are kept from earlier versions so existing scenes keep their values.
         [SerializeField, Multiline, Tooltip("Text to generate. Supports line breaks (\\n) and tabs.")]
         private string m_Text;
@@ -64,6 +73,12 @@ namespace Softgraph.TextMesh3D.Runtime
         [SerializeField, Range(1, 32), Tooltip("Points per curved outline segment. Higher gives smoother curves and more triangles.")]
         private int m_CurveSegments = 3;
 
+        [SerializeField, Tooltip("XZ: lying flat, extruded up (+Y). XY: standing up facing -Z (the default camera), extruded back along +Z.")]
+        private TextPlane m_Plane = TextPlane.XZ;
+
+        [SerializeField, Tooltip("Distance between lines, as a multiple of the font's line height (1 = the font's default).")]
+        private float m_LineSpacing = 1f;
+
         [SerializeField, HideInInspector, UnityEngine.Serialization.FormerlySerializedAs("m_GeneratedRoot")]
         private GameObject m_GeneratedRoot;
 
@@ -80,6 +95,8 @@ namespace Softgraph.TextMesh3D.Runtime
         public bool Kerning { get => m_Kerning; set => m_Kerning = value; }
         public bool GroupOutput { get => m_GroupOutput; set => m_GroupOutput = value; }
         public int CurveSegments { get => m_CurveSegments; set => m_CurveSegments = value; }
+        public TextPlane Plane { get => m_Plane; set => m_Plane = value; }
+        public float LineSpacing { get => m_LineSpacing; set => m_LineSpacing = value; }
 
         /// <summary>The object holding the generated per-character children (null when grouped or not generated).</summary>
         public GameObject GeneratedRoot => m_GeneratedRoot;
@@ -164,7 +181,24 @@ namespace Softgraph.TextMesh3D.Runtime
                 Debug.LogError($"TextMesh3D: Spacing must be a finite number (is {m_Spacing}).", this);
                 return false;
             }
+            if (float.IsNaN(m_LineSpacing) || float.IsInfinity(m_LineSpacing))
+            {
+                Debug.LogError($"TextMesh3D: Line Spacing must be a finite number (is {m_LineSpacing}).", this);
+                return false;
+            }
             return true;
+        }
+
+        /// <summary>
+        /// Maps the internal layout (text on XZ, glyph up = +Z, extrusion +Y) to the chosen plane, in this object's space.
+        /// XY: rotated -90° about X so glyph up becomes +Y and the extrusion points to -Z, then shifted by the extrusion
+        /// depth so the front face sits at z = 0 facing -Z and the depth goes back along +Z.
+        /// </summary>
+        private Matrix4x4 GetPlaneMatrix()
+        {
+            if (m_Plane != TextPlane.XY) return Matrix4x4.identity;
+            float depth = m_Output == OutputMode.Mesh ? m_Extrusion : 0f;
+            return Matrix4x4.TRS(new Vector3(0f, 0f, depth), Quaternion.Euler(-90f, 0f, 0f), Vector3.one);
         }
 
         private const string k_UndoName = "Generate TextMesh3D";
@@ -228,13 +262,18 @@ namespace Softgraph.TextMesh3D.Runtime
             m_GeneratedRoot = new GameObject(fontName);
             m_GeneratedRoot.transform.SetParent(transform, false);
 
+            // Glyphs are always laid out on XZ; the root orients them onto the chosen plane (see GetPlaneMatrix).
+            var plane = GetPlaneMatrix();
+            m_GeneratedRoot.transform.localPosition = plane.GetColumn(3);
+            m_GeneratedRoot.transform.localRotation = plane.rotation;
+
             m_GlyphObjects = new GameObject[m_Text.Length];
 
             var pen = float3.zero;
 
             // m_Size is the em size in Unity units, so text has the same size for any font regardless of UnitsPerEm.
             var scale = GetFontScale(typeface, m_Size);
-            var lineHeight = GetLineHeight(typeface) * scale;
+            var lineHeight = GetLineHeight(typeface) * scale * m_LineSpacing;
             var spaceAdvance = GetAdvanceWidth(typeface, typeface.GetGlyphIndex(' ')) * scale;
             var missing = new List<char>();
 
