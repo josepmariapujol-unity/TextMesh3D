@@ -17,6 +17,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
 - Group Output: merges all glyphs into one mesh on the object.
 - Curve Segments setting for curve quality.
 - UVs (em units) and tangents on generated meshes.
+- Save as Prefab: saves the generated text as a baked prefab (no TextMesh3D component) with its meshes stored inside the .prefab file. Available in the inspector, the TextMesh3D window and the component's context menu, and from editor scripts via `TextMesh3DPrefabExporter.SaveAsPrefab()`.
 - Undo support: each Apply is one undo step.
 - Multi-object editing in the inspector; the TextMesh3D window follows the selection.
 - Warnings for characters the font does not contain.

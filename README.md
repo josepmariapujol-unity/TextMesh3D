@@ -26,6 +26,17 @@ TextMesh3D reads TrueType (`.ttf`) and OpenType (`.otf`) fonts and turns text in
 2. In the inspector, edit the text, font, output and size, then press **Apply**.
 3. Optional: **Window > TextMesh3D** edits the selected text in a separate window.
 
+### Saving as a prefab
+
+After **Apply**, press **Save as Prefab...** (inspector or TextMesh3D window, or the component's context menu) to save the generated text as a `.prefab`.
+
+- The prefab is **baked**: plain objects with MeshFilter/MeshRenderer (Surface, Mesh) or SplineContainer (Spline), without the TextMesh3D component. It does not need this package or the font at runtime.
+- The meshes are stored **inside the .prefab file**, so the prefab stays valid when you regenerate or delete the original text.
+- Saving to an existing prefab replaces its content and meshes; its instances in scenes update.
+- To edit the text later, keep the original TextMesh3D object, change it, and save again to the same prefab.
+
+From editor scripts: `TextMesh3DPrefabExporter.SaveAsPrefab(container, "Assets/Text/Title.prefab")` (namespace `Softgraph.TextMesh3D.Editor`).
+
 ### From code
 
 ```csharp

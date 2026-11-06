@@ -83,6 +83,31 @@ namespace Softgraph.TextMesh3D.Editor
                     ((TextMesh3DContainer) t).Generate();
                 }
             }
+
+            var container = (TextMesh3DContainer) target;
+            using (new EditorGUI.DisabledScope(targets.Length != 1 || !TextMesh3DPrefabExporter.HasOutput(container)))
+            {
+                if (GUILayout.Button(new GUIContent("Save as Prefab...", k_SaveAsPrefabTooltip)))
+                {
+                    TextMesh3DPrefabExporter.SaveAsPrefabWithDialog(container);
+                    GUIUtility.ExitGUI(); // the save dialog breaks the current layout pass
+                }
+            }
+        }
+
+        internal const string k_SaveAsPrefabTooltip =
+            "Save the generated text as a prefab with its meshes stored inside, without the TextMesh3D component. Press Apply first.";
+
+        [MenuItem("CONTEXT/TextMesh3DContainer/Save as Prefab...")]
+        static void SaveAsPrefabContextMenu(MenuCommand command)
+        {
+            TextMesh3DPrefabExporter.SaveAsPrefabWithDialog((TextMesh3DContainer) command.context);
+        }
+
+        [MenuItem("CONTEXT/TextMesh3DContainer/Save as Prefab...", true)]
+        static bool ValidateSaveAsPrefabContextMenu(MenuCommand command)
+        {
+            return TextMesh3DPrefabExporter.HasOutput(command.context as TextMesh3DContainer);
         }
     }
 }

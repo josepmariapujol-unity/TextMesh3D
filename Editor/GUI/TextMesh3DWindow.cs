@@ -112,6 +112,15 @@ namespace Softgraph.TextMesh3D.Editor
             {
                 targetContainer.Generate();
             }
+
+            using (new EditorGUI.DisabledScope(!TextMesh3DPrefabExporter.HasOutput(targetContainer)))
+            {
+                if (GUILayout.Button(new GUIContent("Save as Prefab...", TextMesh3DContainerEditor.k_SaveAsPrefabTooltip)))
+                {
+                    TextMesh3DPrefabExporter.SaveAsPrefabWithDialog(targetContainer);
+                    GUIUtility.ExitGUI();
+                }
+            }
         }
     }
 }
