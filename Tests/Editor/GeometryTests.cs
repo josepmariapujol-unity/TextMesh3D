@@ -218,7 +218,7 @@ namespace Softgraph.TextMesh3D.Tests
         }
 
         [Test]
-        public void GlyphSplineReader_QuadraticCurve_SetsTangent()
+        public void GlyphSplineReader_QuadraticCurve_SetsTangents()
         {
             var container = NewEmptyContainer(out var go);
             try
@@ -232,12 +232,78 @@ namespace Softgraph.TextMesh3D.Tests
 
                 var spline = container.Splines[0];
                 Assert.AreEqual(2, spline.Count);
-                Assert.AreEqual(new float3(0.5f, 0, 1f), spline[0].TangentOut);
+                // Exact quadratic -> cubic: tangents are 2/3 of the way to the quadratic control point (0.5, 1).
+                AssertNear(new float3(1f / 3f, 0, 2f / 3f), spline[0].TangentOut);
+                AssertNear(new float3(-1f / 3f, 0, 2f / 3f), spline[1].TangentIn);
             }
             finally
             {
                 Object.DestroyImmediate(go);
             }
+        }
+
+        [TestCase(0f, 0f, 0.5f, 1f, 1f, 0f)]
+        [TestCase(10f, -3f, 40f, 25f, 70f, 2f)]
+        [TestCase(0f, 0f, 0f, 100f, 100f, 100f)]   // quarter-circle-like corner
+        public void GlyphSplineReader_QuadraticCurve_MatchesQuadraticExactly(float x0, float y0, float x1, float y1, float x2, float y2)
+        {
+            var container = NewEmptyContainer(out var go);
+            try
+            {
+                var reader = new GlyphSplineReader(container);
+                reader.BeginRead(1);
+                reader.MoveTo(x0, y0);
+                reader.Curve3(x1, y1, x2, y2);
+                reader.LineTo(x0, y0);
+                reader.CloseContour();
+                reader.EndRead();
+
+                var spline = container.Splines[0];
+                var curve = new BezierCurve(spline[0], spline[1]);
+                for (int i = 0; i <= 8; i++)
+                {
+                    float t = i / 8f, u = 1f - t;
+                    // Quadratic Bézier: (1-t)² P0 + 2(1-t)t Q1 + t² P2, with font Y on Unity Z
+                    var expected = new float3(
+                        u * u * x0 + 2f * u * t * x1 + t * t * x2,
+                        0f,
+                        u * u * y0 + 2f * u * t * y1 + t * t * y2);
+                    AssertNear(expected, CurveUtility.EvaluatePosition(curve, t), $"t = {t}");
+                }
+            }
+            finally
+            {
+                Object.DestroyImmediate(go);
+            }
+        }
+
+        [Test]
+        public void GlyphSplineReader_QuadraticCurveClosingContour_KeepsTangentOnFirstKnot()
+        {
+            var container = NewEmptyContainer(out var go);
+            try
+            {
+                var reader = new GlyphSplineReader(container);
+                reader.BeginRead(1);
+                reader.MoveTo(0, 0);
+                reader.LineTo(2, 0);
+                reader.Curve3(2, 2, 0, 0); // ends on the start point: merged into the first knot
+                reader.CloseContour();
+                reader.EndRead();
+
+                var spline = container.Splines[0];
+                Assert.AreEqual(2, spline.Count);
+                AssertNear(new float3(4f / 3f, 0, 4f / 3f), spline[0].TangentIn);
+            }
+            finally
+            {
+                Object.DestroyImmediate(go);
+            }
+        }
+
+        static void AssertNear(float3 expected, float3 actual, string message = null)
+        {
+            Assert.Less(math.distance(expected, actual), 1e-4f, $"{message} expected {expected}, got {actual}");
         }
 
         [Test]

@@ -47,12 +47,20 @@ namespace Softgraph.TextMesh3D.Runtime
             MoveTo(x1, y1);
         }
 
+        /// <summary>
+        /// Quadratic Bézier (TrueType) from the current point P0 through control Q1 to P2, stored as the exactly
+        /// equivalent cubic: control points P0 + ⅔(Q1 − P0) and P2 + ⅔(Q1 − P2).
+        /// </summary>
         public void Curve3(float x1, float y1, float x2, float y2)
         {
-            currentKnot.TangentOut = new float3(x1, 0, y1) - currentKnot.Position;
+            var control = new float3(x1, 0, y1);
+            currentKnot.TangentOut = k_QuadraticToCubic * (control - currentKnot.Position);
             currentSpline.Add(currentKnot, TangentMode.Broken);
             MoveTo(x2, y2);
+            currentKnot.TangentIn = k_QuadraticToCubic * (control - currentKnot.Position);
         }
+
+        private const float k_QuadraticToCubic = 2f / 3f;
 
         public void Curve4(float x1, float y1, float x2, float y2, float x3, float y3)
         {

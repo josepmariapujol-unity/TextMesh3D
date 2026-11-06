@@ -27,6 +27,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
 - Sample: TextMesh3D Examples (updating text from code).
 
 ### Fixed
+- Curves of TrueType fonts (quadratic Béziers) were converted to slightly wrong cubic curves, distorting round letters. They are now converted exactly.
 - Player builds failed to compile (runtime code used `UnityEditor`). The font file is now cached with the object.
 - Empty meshes for fonts with dense outlines (e.g. Garamond "H"), caused by fixed tolerances in the triangulator.
 - Holes filled solid in fonts that list holes before the outline (e.g. Helvetica / Futura "B", "8", "&", "$").
