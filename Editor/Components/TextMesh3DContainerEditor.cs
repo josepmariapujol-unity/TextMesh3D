@@ -42,6 +42,7 @@ namespace Softgraph.TextMesh3D.Editor
         public override void OnInspectorGUI()
         {
             serializedObject.Update();
+            EditorGUI.BeginChangeCheck();
 
             EditorGUILayout.PropertyField(m_Text, new GUIContent());
             EditorGUILayout.PropertyField(m_Font);
@@ -58,7 +59,7 @@ namespace Softgraph.TextMesh3D.Editor
                 EditorGUILayout.PropertyField(m_Extrusion);
             }
 
-            showInfo = EditorGUILayout.Foldout(showInfo , "Advanced");
+            showInfo = DrawFoldout(showInfo, "Advanced");
 
             if(showInfo)
             {
@@ -72,15 +73,11 @@ namespace Softgraph.TextMesh3D.Editor
                 }
             }
 
+            bool changed = EditorGUI.EndChangeCheck(); // the Advanced foldout doesn't count: it isn't a setting
             serializedObject.ApplyModifiedProperties();
+            if (changed) TextMesh3DAutoApply.Schedule(targets);
 
-            if (GUILayout.Button(targets.Length > 1 ? $"Apply ({targets.Length} objects)" : "Apply"))
-            {
-                foreach (var t in targets)
-                {
-                    ((TextMesh3DContainer) t).Generate();
-                }
-            }
+            TextMesh3DAutoApply.DrawApplyControls(targets, targets.Length > 1 ? $"Apply ({targets.Length} objects)" : "Apply");
 
             var container = (TextMesh3DContainer) target;
             using (new EditorGUI.DisabledScope(targets.Length != 1 || !TextMesh3DPrefabExporter.HasOutput(container)))
@@ -91,6 +88,15 @@ namespace Softgraph.TextMesh3D.Editor
                     GUIUtility.ExitGUI(); // the save dialog breaks the current layout pass
                 }
             }
+        }
+
+        /// <summary>A foldout that doesn't mark the surrounding change check as changed when opened or closed.</summary>
+        internal static bool DrawFoldout(bool expanded, string label)
+        {
+            bool changed = GUI.changed;
+            expanded = EditorGUILayout.Foldout(expanded, label, true);
+            GUI.changed = changed;
+            return expanded;
         }
 
         internal const string k_SaveAsPrefabTooltip =

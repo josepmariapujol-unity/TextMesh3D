@@ -80,6 +80,7 @@ namespace Softgraph.TextMesh3D.Editor
 
             EditorGUILayout.LabelField("Editing", targetContainer.name, EditorStyles.boldLabel);
             serializedObject.Update();
+            EditorGUI.BeginChangeCheck();
 
             EditorGUILayout.PropertyField(m_Text);
             EditorGUILayout.PropertyField(m_Font);
@@ -98,7 +99,7 @@ namespace Softgraph.TextMesh3D.Editor
                 EditorGUILayout.PropertyField(m_Extrusion);
             }
 
-            showInfo = EditorGUILayout.Foldout(showInfo, "Advanced");
+            showInfo = TextMesh3DContainerEditor.DrawFoldout(showInfo, "Advanced");
 
             if (showInfo)
             {
@@ -112,12 +113,11 @@ namespace Softgraph.TextMesh3D.Editor
                 }
             }
 
+            bool changed = EditorGUI.EndChangeCheck();
             serializedObject.ApplyModifiedProperties();
+            if (changed) TextMesh3DAutoApply.Schedule(new Object[] { targetContainer });
 
-            if (GUILayout.Button("Apply"))
-            {
-                targetContainer.Generate();
-            }
+            TextMesh3DAutoApply.DrawApplyControls(new Object[] { targetContainer }, "Apply");
 
             using (new EditorGUI.DisabledScope(!TextMesh3DPrefabExporter.HasOutput(targetContainer)))
             {

@@ -13,6 +13,7 @@ TextMesh3D reads TrueType (`.ttf`) and OpenType (`.otf`) fonts and turns text in
 - **Group Output:** merge the whole text into one mesh on the object (one draw call)
 - **Flat or upright:** lay text out on the XZ plane or stand it up on XY
 - **Adjustable curve quality:** Curve Segments sets how finely curves are flattened
+- **Live preview:** Auto Apply regenerates shortly after each edit (debounced, one Undo step per edit)
 - **Editor friendly:** one Undo step per Apply, multi-object editing, a TextMesh3D window that follows the selection
 - **Works in player builds:** the font is stored with the object when you assign it in the editor
 
@@ -24,7 +25,7 @@ TextMesh3D reads TrueType (`.ttf`) and OpenType (`.otf`) fonts and turns text in
 ## Getting started
 
 1. **GameObject > 3D Object > Text - TextMesh3D.** This creates "New Text" with the default font (Roboto) and material.
-2. In the inspector, edit the text, font, output and size, then press **Apply**.
+2. In the inspector, edit the text, font, output and size. With **Auto Apply** on (the default) the text updates as you edit; with it off, press **Apply**.
 3. Optional: **Window > TextMesh3D** edits the selected text in a separate window.
 
 ### Saving as a prefab
