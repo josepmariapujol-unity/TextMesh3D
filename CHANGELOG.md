@@ -24,7 +24,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
 - Multi-object editing in the inspector; the TextMesh3D window follows the selection.
 - Warnings for characters the font does not contain.
 - Test suite (edit mode and play mode), including snapshot tests of the generated geometry.
-- Sample: TextMesh3D Examples (updating text from code).
+- Sample: TextMesh3D Examples (a Hello World scene, updating text from code).
 
 ### Fixed
 - Curves of TrueType fonts (quadratic Béziers) were converted to slightly wrong cubic curves, distorting round letters. They are now converted exactly.

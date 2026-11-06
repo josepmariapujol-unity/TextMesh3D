@@ -15,7 +15,7 @@
   "samples": [
     {
       "displayName": "TextMesh3D Examples",
-      "description": "Scripts showing how to update and create TextMesh3D text from code.",
+      "description": "A Hello World scene, and scripts showing how to update TextMesh3D text from code.",
       "path": "Samples~/Examples"
     }
   ],
