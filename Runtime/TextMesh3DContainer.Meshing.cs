@@ -25,101 +25,142 @@ namespace Softgraph.TextMesh3D.Runtime
             public int parent = -1;        // for holes: index of the outline that contains it
         }
 
-        private void BuildGlyphMeshes(bool extrude)
+        // ---------- Glyph mesh cache ----------
+        // Triangulating a glyph is the expensive part of generation. Each glyph is meshed once per combination of
+        // settings that change its shape, and every occurrence of it (and later Generate() calls) shares that mesh.
+
+        private (Typeface typeface, float size, int curveSegments, float height, bool extrude, TextPlane plane)? m_MeshCacheKey;
+        [NonSerialized] private readonly Dictionary<int, Mesh> m_MeshCache = new Dictionary<int, Mesh>();
+        [NonSerialized] private readonly HashSet<int> m_EmptyGlyphs = new HashSet<int>();   // glyphs with no outline (space, ...)
+        [NonSerialized] private readonly HashSet<Mesh> m_CachedMeshes = new HashSet<Mesh>();
+
+        /// <summary>Number of glyph meshes built (triangulated) so far, for tests and diagnostics.</summary>
+        internal int GlyphMeshBuildCount { get; private set; }
+
+        private bool IsCachedMesh(Mesh mesh) => m_CachedMeshes.Contains(mesh);
+
+        /// <summary>Keeps the cache when the shape-affecting settings are unchanged; otherwise starts a new one.</summary>
+        private void PrepareMeshCache(Typeface typeface)
         {
-            float height = extrude ? m_Extrusion : 0f;
+            bool extrude = m_Output == OutputMode.Mesh;
+            var key = (typeface, m_Size, Mathf.Max(1, m_CurveSegments), extrude ? m_Extrusion : 0f, extrude, m_Plane);
+            if (m_MeshCacheKey.HasValue && m_MeshCacheKey.Value.Equals(key)) return;
 
-            for (int i = 0; i < m_GlyphObjects.Length; i++)
-            {
-                var splineContainer = m_GlyphObjects[i].GetComponent<SplineContainer>();
-                var contours = BuildContours(splineContainer);
-
-                // Spaces, line breaks, tabs, empty glyphs: nothing to mesh
-                if (contours.Count == 0)
-                {
-                    SafeDestroy(splineContainer);
-                    continue;
-                }
-
-                m_GlyphObjects[i].AddComponent<MeshFilter>();
-                // sharedMaterial: .material would instantiate (and leak) a copy in edit mode
-                m_GlyphObjects[i].AddComponent<MeshRenderer>().sharedMaterial = m_Material;
-
-                // Order: walls, then top caps, then bottom caps (same order as before the refactor).
-                var walls = new List<Mesh>();
-                var tops = new List<Mesh>();
-                var bottoms = new List<Mesh>();
-
-                if (extrude)
-                {
-                    foreach (var contour in contours)
-                    {
-                        walls.Add(BuildWalls(contour.points, height));
-                    }
-                }
-
-                for (int c = 0; c < contours.Count; c++)
-                {
-                    if (contours[c].isHole) continue;
-
-                    var holes = new List<Contour>();
-                    foreach (var other in contours)
-                    {
-                        if (other.isHole && other.parent == c) holes.Add(other);
-                    }
-
-                    // A malformed outline must not abort the whole text: skip its caps (walls are kept) and report it.
-                    try
-                    {
-                        BuildCaps(contours[c], holes, height, out var top, out var bottom);
-                        if (top != null) tops.Add(top);
-                        if (bottom != null) bottoms.Add(bottom);
-                    }
-                    catch (Exception e)
-                    {
-                        Debug.LogWarning($"TextMesh3D: could not fill an outline of '{m_Text[i]}' ({m_GlyphObjects[i].name}): {e.Message}", m_GlyphObjects[i]);
-                    }
-                }
-
-                var parts = new List<Mesh>(walls.Count + tops.Count + bottoms.Count);
-                parts.AddRange(walls);
-                parts.AddRange(tops);
-                parts.AddRange(bottoms);
-
-                var combined = Combine(parts, m_GlyphObjects[i].name, recalculateNormals: extrude);
-                m_GlyphObjects[i].GetComponent<MeshFilter>().sharedMesh = combined;
-
-                SafeDestroy(splineContainer);
-            }
-
-            if (m_GroupOutput)
-            {
-                GroupIntoRootMesh();
-            }
+            ClearMeshCache();
+            m_MeshCacheKey = key;
         }
 
         /// <summary>
-        /// Group Output: merges every glyph into one mesh on this object's MeshFilter / MeshRenderer and removes
-        /// the per-glyph objects. One object and one draw call for the whole text.
+        /// Forgets the cached meshes. Called after the previous output was removed, so nothing uses them any more.
+        /// While playing they are destroyed (no leaks when settings change at runtime). In edit mode they are kept
+        /// alive for Undo, which can bring back output that uses them; Unity frees unused ones when the scene is saved.
         /// </summary>
-        private void GroupIntoRootMesh()
+        private void ClearMeshCache()
         {
-            var glyphMeshes = new List<Mesh>();
+            if (Application.isPlaying)
+            {
+                foreach (var mesh in m_CachedMeshes) SafeDestroy(mesh);
+            }
+            m_MeshCache.Clear();
+            m_EmptyGlyphs.Clear();
+            m_CachedMeshes.Clear();
+            m_MeshCacheKey = null;
+        }
+
+        /// <summary>The mesh of one glyph (shared by all its occurrences), or null when it has no outline.</summary>
+        private Mesh GetGlyphMesh(Typeface typeface, GlyphPlacement placement, float scale)
+        {
+            int glyphIndex = placement.glyphIndex;
+            if (glyphIndex < 0 || m_EmptyGlyphs.Contains(glyphIndex)) return null;
+            if (m_MeshCache.TryGetValue(glyphIndex, out var cached) && cached != null) return cached; // != null: not destroyed
+
+            var mesh = BuildGlyphMesh(typeface.GetGlyph((ushort)glyphIndex), scale, placement.character);
+            GlyphMeshBuildCount++;
+            if (mesh == null)
+            {
+                m_EmptyGlyphs.Add(glyphIndex);
+                return null;
+            }
+            m_MeshCache[glyphIndex] = mesh;
+            m_CachedMeshes.Add(mesh);
+            return mesh;
+        }
+
+        /// <summary>Triangulates one glyph: walls (Mesh only), then top caps, then bottom caps, oriented for the plane.</summary>
+        private Mesh BuildGlyphMesh(Glyph glyph, float scale, char character)
+        {
+            bool extrude = m_Output == OutputMode.Mesh;
+            float height = extrude ? m_Extrusion : 0f;
+
+            var splines = new List<Spline>();
+            new GlyphSplineReader(splines).Read(glyph, scale);
+            var contours = BuildContours(splines);
+            if (contours.Count == 0) return null; // spaces, empty glyphs: nothing to mesh
+
+            var walls = new List<Mesh>();
+            var tops = new List<Mesh>();
+            var bottoms = new List<Mesh>();
+
+            if (extrude)
+            {
+                foreach (var contour in contours)
+                {
+                    walls.Add(BuildWalls(contour.points, height));
+                }
+            }
+
+            for (int c = 0; c < contours.Count; c++)
+            {
+                if (contours[c].isHole) continue;
+
+                var holes = new List<Contour>();
+                foreach (var other in contours)
+                {
+                    if (other.isHole && other.parent == c) holes.Add(other);
+                }
+
+                // A malformed outline must not abort the whole text: skip its caps (walls are kept) and report it.
+                try
+                {
+                    BuildCaps(contours[c], holes, height, out var top, out var bottom);
+                    if (top != null) tops.Add(top);
+                    if (bottom != null) bottoms.Add(bottom);
+                }
+                catch (Exception e)
+                {
+                    Debug.LogWarning($"TextMesh3D: could not fill an outline of '{character}': {e.Message}", this);
+                }
+            }
+
+            var parts = new List<Mesh>(walls.Count + tops.Count + bottoms.Count);
+            parts.AddRange(walls);
+            parts.AddRange(tops);
+            parts.AddRange(bottoms);
+
+            var mesh = Combine(parts, GetCharacterObjectName(character), recalculateNormals: extrude);
+            if (m_Plane != TextPlane.XZ) RotateMesh(mesh, GetPlaneMatrix().rotation);
+            return mesh;
+        }
+
+        /// <summary>
+        /// Group Output: merges every glyph into one mesh on this object's MeshFilter / MeshRenderer, straight from the
+        /// cached glyph meshes. No per-character objects are created. One object and one draw call for the whole text.
+        /// </summary>
+        private void BuildGroupedMesh(Typeface typeface, float scale, List<GlyphPlacement> placements, Matrix4x4 plane)
+        {
             var instances = new List<CombineInstance>();
             int vertexCount = 0;
-            var plane = GetPlaneMatrix(); // the grouped mesh has no root object to carry the orientation
 
-            for (int i = 0; i < m_GlyphObjects.Length; i++)
+            foreach (var placement in placements)
             {
-                var filter = m_GlyphObjects[i] != null ? m_GlyphObjects[i].GetComponent<MeshFilter>() : null;
-                if (filter == null || filter.sharedMesh == null) continue;
+                var mesh = GetGlyphMesh(typeface, placement, scale);
+                if (mesh == null) continue;
 
-                glyphMeshes.Add(filter.sharedMesh);
-                vertexCount += filter.sharedMesh.vertexCount;
+                vertexCount += mesh.vertexCount;
                 instances.Add(new CombineInstance
                 {
-                    mesh = filter.sharedMesh,
-                    transform = plane * Matrix4x4.Translate(m_GlyphObjects[i].transform.localPosition),
+                    mesh = mesh,
+                    transform = Matrix4x4.Translate(plane.MultiplyPoint3x4(placement.position)),
                 });
             }
 
@@ -136,12 +177,6 @@ namespace Softgraph.TextMesh3D.Runtime
             if (rootRenderer == null) rootRenderer = gameObject.AddComponent<MeshRenderer>();
             rootFilter.sharedMesh = grouped;
             rootRenderer.sharedMaterial = m_Material;
-
-            // The per-glyph objects were created in this same call, so they can go without an undo record.
-            foreach (var mesh in glyphMeshes) SafeDestroy(mesh);
-            SafeDestroy(m_GeneratedRoot);
-            m_GeneratedRoot = null;
-            m_GlyphObjects = new GameObject[0];
         }
 
         /// <summary>
@@ -150,10 +185,10 @@ namespace Softgraph.TextMesh3D.Runtime
         /// (some fonts list holes before the outline, which used to fill holes in e.g. Helvetica "B" and "8").
         /// Outlines are oriented counter-clockwise and holes clockwise, as the triangulator expects.
         /// </summary>
-        private List<Contour> BuildContours(SplineContainer container)
+        private List<Contour> BuildContours(List<Spline> splines)
         {
             var contours = new List<Contour>();
-            foreach (var spline in container.Splines)
+            foreach (var spline in splines)
             {
                 // Some fonts emit single-knot "contours"; they enclose nothing.
                 if (spline.Count < 2) continue;

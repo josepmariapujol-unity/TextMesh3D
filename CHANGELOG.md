@@ -28,6 +28,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
 - Sample: TextMesh3D Examples (a Hello World scene, updating text from code).
 
 ### Fixed
+- Missing kerning for many pairs in fonts that use class-based GPOS kerning (e.g. Roboto "AV", "AT", "AW"): glyphs not listed in a class definition must be treated as class 0. Pair kerning is now read directly from the font's GPOS table.
+- Undo after regenerating could remove the new output without restoring the previous one (the reference to it was not recorded).
+- The editor could freeze for minutes when generating text for the first time or changing its font: the cached font file was a byte array, which Undo records one byte at a time. It is now stored as a single string; scenes from earlier versions are converted when loaded.
 - Curves of TrueType fonts (quadratic Béziers) were converted to slightly wrong cubic curves, distorting round letters. They are now converted exactly.
 - Player builds failed to compile (runtime code used `UnityEditor`). The font file is now cached with the object.
 - Empty meshes for fonts with dense outlines (e.g. Garamond "H"), caused by fixed tolerances in the triangulator.
@@ -39,6 +42,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
 
 ### Changed
 - The font file is parsed once per object and reused by later `Generate()` calls (also the kerning tables and pair lookups).
+- Glyph meshes are cached per glyph: repeated letters share one mesh and are triangulated once, and later `Generate()` calls only build glyphs that are new (e.g. a score counter only builds each digit once). The cache is rebuilt when Font, Size, Extrusion, Curve Segments, Plane or Output change; while playing, the old meshes are destroyed.
+- Layout no longer creates a temporary GameObject and SplineContainer per character: Group Output creates no per-character objects at all, and Surface/Mesh glyph objects get only their MeshFilter and MeshRenderer.
 - Default font for new text is Roboto.
 - Core folders renamed (no numbers or spaces); `TextMesh3DContainer` split into partial files.
 

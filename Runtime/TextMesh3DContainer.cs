@@ -82,8 +82,13 @@ namespace Softgraph.TextMesh3D.Runtime
         [SerializeField, HideInInspector, UnityEngine.Serialization.FormerlySerializedAs("m_GeneratedRoot")]
         private GameObject m_GeneratedRoot;
 
-        // One object per character of m_Text, valid during a Generate() call
-        private GameObject[] m_GlyphObjects;
+        /// <summary>One character of the laid-out text, before any objects or meshes are created.</summary>
+        private struct GlyphPlacement
+        {
+            public char character;
+            public int glyphIndex;    // -1 for control characters (\n, \t, ...), which have no glyph
+            public Vector3 position;  // pen position on the internal XZ layout (before the plane is applied)
+        }
 
         public string Text { get => m_Text; set => m_Text = value; }
         public Font Font { get => m_Font; set => m_Font = value; }
@@ -113,11 +118,24 @@ namespace Softgraph.TextMesh3D.Runtime
             int undoGroup = -1;
             if (recordUndo)
             {
+                // Turn the caller's pending Undo.RecordObject changes (e.g. "RecordObject, then Text = ...") into undo
+                // records first. A complete snapshot of an object discards its pending RecordObject diff, so without
+                // this the edit that triggered Generate (Auto Apply, editor scripts) could not be undone.
+                Undo.FlushUndoRecordObjects();
+
+                // Cache the font file before the snapshot below. It is derived data (re-read whenever it doesn't match
+                // the Font asset), so it doesn't need its own undo record.
+                CacheFontData();
+
                 Undo.SetCurrentGroupName(k_UndoName);
                 undoGroup = Undo.GetCurrentGroup();
-                Undo.RecordObject(this, k_UndoName);
-                if (TryGetComponent<MeshFilter>(out var rootFilter)) Undo.RecordObject(rootFilter, k_UndoName);
-                if (TryGetComponent<MeshRenderer>(out var rootRenderer)) Undo.RecordObject(rootRenderer, k_UndoName);
+                // Complete snapshots, not RecordObject: RecordObject only diffs at the next undo flush, and
+                // Undo.DestroyObjectImmediate (removing the previous output) flushes immediately, before
+                // m_GeneratedRoot and the grouped mesh are reassigned. Those later changes were then never recorded,
+                // so Undo removed the new output but left m_GeneratedRoot pointing at it instead of the old one.
+                Undo.RegisterCompleteObjectUndo(this, k_UndoName);
+                if (TryGetComponent<MeshFilter>(out var rootFilter)) Undo.RegisterCompleteObjectUndo(rootFilter, k_UndoName);
+                if (TryGetComponent<MeshRenderer>(out var rootRenderer)) Undo.RegisterCompleteObjectUndo(rootRenderer, k_UndoName);
             }
 #endif
             try
@@ -132,12 +150,8 @@ namespace Softgraph.TextMesh3D.Runtime
                 }
                 else
                 {
-                    // Only touch glyphs created by this call: on failure m_GlyphObjects may still list the previous output.
-                    if (LayoutGlyphs())
-                    {
-                        if (m_Output != OutputMode.Spline) BuildGlyphMeshes(extrude: m_Output == OutputMode.Mesh);
-                        ApplyPlaneToGlyphs();
-                    }
+                    var typeface = LoadTypeface();
+                    if (typeface != null) BuildOutput(typeface); // on failure the previous output stays
                 }
             }
             catch (Exception e)
@@ -196,30 +210,75 @@ namespace Softgraph.TextMesh3D.Runtime
         }
 
         /// <summary>
-        /// Writes the plane orientation into the per-glyph output itself (glyph positions, mesh vertices, normals,
-        /// tangents and spline knots), so the result is correct regardless of the generated root's transform.
-        /// Group Output already applies it while merging (see GroupIntoRootMesh).
+        /// Lays out the text, removes the previous output and builds the new one. The plane orientation is written
+        /// into the output itself (positions, mesh vertices, spline knots), so it doesn't depend on any transform.
         /// </summary>
-        private void ApplyPlaneToGlyphs()
+        private void BuildOutput(Typeface typeface)
         {
-            if (m_Plane == TextPlane.XZ || m_GlyphObjects == null) return;
-
+            var scale = GetFontScale(typeface, m_Size);
+            var placements = LayoutText(typeface, scale);
             var plane = GetPlaneMatrix();
-            var rotation = plane.rotation;
-            foreach (var glyph in m_GlyphObjects)
-            {
-                if (glyph == null) continue;
-                var t = glyph.transform;
-                t.localPosition = plane.MultiplyPoint3x4(t.localPosition);
 
-                if (glyph.TryGetComponent<MeshFilter>(out var filter) && filter.sharedMesh != null)
+            ClearPreviousOutput();
+
+            if (m_Output == OutputMode.Spline)
+            {
+                BuildSplineObjects(typeface, scale, placements, plane);
+                return;
+            }
+
+            PrepareMeshCache(typeface);
+            if (m_GroupOutput) BuildGroupedMesh(typeface, scale, placements, plane);
+            else BuildMeshObjects(typeface, scale, placements, plane);
+        }
+
+        /// <summary>The generated root with one child object per character, in text order.</summary>
+        private GameObject[] CreateCharacterObjects(List<GlyphPlacement> placements, Matrix4x4 plane)
+        {
+            m_GeneratedRoot = new GameObject(m_Font != null ? m_Font.name : "TextMesh3D");
+            m_GeneratedRoot.transform.SetParent(transform, false);
+
+            var objects = new GameObject[placements.Count];
+            for (int i = 0; i < placements.Count; i++)
+            {
+                objects[i] = new GameObject(GetCharacterObjectName(placements[i].character));
+                objects[i].transform.SetParent(m_GeneratedRoot.transform, false);
+                objects[i].transform.localPosition = plane.MultiplyPoint3x4(placements[i].position);
+            }
+            return objects;
+        }
+
+        /// <summary>Spline output: one SplineContainer per glyph, with one closed spline per outline.</summary>
+        private void BuildSplineObjects(Typeface typeface, float scale, List<GlyphPlacement> placements, Matrix4x4 plane)
+        {
+            var objects = CreateCharacterObjects(placements, plane);
+            for (int i = 0; i < placements.Count; i++)
+            {
+                if (placements[i].glyphIndex < 0) continue; // control characters have no outline
+
+                var container = objects[i].AddComponent<SplineContainer>();
+                container.RemoveSplineAt(0);
+                new GlyphSplineReader(container).Read(typeface.GetGlyph((ushort)placements[i].glyphIndex), scale);
+
+                if (m_Plane != TextPlane.XZ)
                 {
-                    RotateMesh(filter.sharedMesh, rotation);
+                    foreach (var spline in container.Splines) RotateSpline(spline, plane.rotation);
                 }
-                if (glyph.TryGetComponent<SplineContainer>(out var splines))
-                {
-                    foreach (var spline in splines.Splines) RotateSpline(spline, rotation);
-                }
+            }
+        }
+
+        /// <summary>Surface/Mesh output: one object per character; repeated glyphs share one cached mesh.</summary>
+        private void BuildMeshObjects(Typeface typeface, float scale, List<GlyphPlacement> placements, Matrix4x4 plane)
+        {
+            var objects = CreateCharacterObjects(placements, plane);
+            for (int i = 0; i < placements.Count; i++)
+            {
+                var mesh = GetGlyphMesh(typeface, placements[i], scale);
+                if (mesh == null) continue; // spaces, line breaks, empty glyphs
+
+                objects[i].AddComponent<MeshFilter>().sharedMesh = mesh;
+                // sharedMaterial: .material would instantiate (and leak) a copy in edit mode
+                objects[i].AddComponent<MeshRenderer>().sharedMaterial = m_Material;
             }
         }
 
@@ -275,7 +334,8 @@ namespace Softgraph.TextMesh3D.Runtime
                 {
                     foreach (var mf in m_GeneratedRoot.GetComponentsInChildren<MeshFilter>(true))
                     {
-                        if (mf.sharedMesh != null && IsGeneratedMesh(mf.sharedMesh)) Destroy(mf.sharedMesh);
+                        // Cached glyph meshes are reused by the next output; the cache frees them when invalidated.
+                        if (mf.sharedMesh != null && IsGeneratedMesh(mf.sharedMesh) && !IsCachedMesh(mf.sharedMesh)) Destroy(mf.sharedMesh);
                     }
                     Destroy(m_GeneratedRoot);
                 }
@@ -306,61 +366,43 @@ namespace Softgraph.TextMesh3D.Runtime
 #endif
         }
 
-        /// <summary>Creates one object per character with its outline splines, positioned by the font's metrics.</summary>
-        private bool LayoutGlyphs()
+        /// <summary>
+        /// Positions every character with the font's advance widths, kerning, line breaks and tabs. Pure layout:
+        /// creates no objects or meshes, so it is cheap to run on every Generate().
+        /// </summary>
+        private List<GlyphPlacement> LayoutText(Typeface typeface, float scale)
         {
-            Typeface typeface = LoadTypeface();
-            if (typeface == null) return false;
+            var placements = new List<GlyphPlacement>(m_Text.Length);
+            var pen = Vector3.zero;
 
-            var fontName = m_Font != null ? m_Font.name : "TextMesh3D";
-            ClearPreviousOutput();
-            m_GeneratedRoot = new GameObject(fontName);
-            m_GeneratedRoot.transform.SetParent(transform, false);
-
-            m_GlyphObjects = new GameObject[m_Text.Length];
-
-            var pen = float3.zero;
-
-            // m_Size is the em size in Unity units, so text has the same size for any font regardless of UnitsPerEm.
-            var scale = GetFontScale(typeface, m_Size);
+            // scale: m_Size is the em size in Unity units, so text has the same size for any font regardless of UnitsPerEm.
             var lineHeight = GetLineHeight(typeface) * scale * m_LineSpacing;
             var spaceAdvance = GetAdvanceWidth(typeface, typeface.GetGlyphIndex(' ')) * scale;
             var missing = new List<char>();
 
             var kerning = m_Kerning ? GetKerning(typeface) : null;
-            int previousGlyph = -1;   // glyph index of the previous character, -1 when the run was broken
-            int previousObject = -1;  // its index in m_GlyphObjects
+            int previousGlyph = -1;     // glyph index of the previous character, -1 when the run was broken
+            int previousPlacement = -1; // its index in placements
 
-            for (int i = 0; i < m_GlyphObjects.Length; i++)
+            for (int i = 0; i < m_Text.Length; i++)
             {
                 char ch = m_Text[i];
 
-                //One object per character, so m_GlyphObjects[i] always matches m_Text[i]
-                m_GlyphObjects[i] = new GameObject(GetCharacterObjectName(ch));
-                m_GlyphObjects[i].transform.parent = m_GeneratedRoot.transform;
-                m_GlyphObjects[i].transform.localPosition = new Vector3(pen.x, pen.y, pen.z);
-
-                var container = m_GlyphObjects[i].AddComponent<SplineContainer>();
-                container.RemoveSplineAt(0);
-
                 //Control characters have no glyph: \n starts a new line (text runs along +X, lines go down -Z),
                 //\t advances 4 spaces, others take no space. Without this they were drawn as "missing glyph" boxes.
-                if (ch == '\n')
+                if (ch == '\n' || ch == '\t' || char.IsControl(ch) || char.IsSurrogate(ch))
                 {
-                    pen.x = 0f;
-                    pen.z -= lineHeight;
-                    previousGlyph = -1; // no kerning across lines
-                    continue;
-                }
-                if (ch == '\t')
-                {
-                    pen.x += 4f * spaceAdvance + m_Spacing;
-                    previousGlyph = -1;
-                    continue;
-                }
-                if (char.IsControl(ch) || char.IsSurrogate(ch))
-                {
-                    previousGlyph = -1;
+                    placements.Add(new GlyphPlacement { character = ch, glyphIndex = -1, position = pen });
+                    if (ch == '\n')
+                    {
+                        pen.x = 0f;
+                        pen.z -= lineHeight;
+                    }
+                    else if (ch == '\t')
+                    {
+                        pen.x += 4f * spaceAdvance + m_Spacing;
+                    }
+                    previousGlyph = -1; // no kerning across lines, tabs or control characters
                     continue;
                 }
 
@@ -379,29 +421,29 @@ namespace Softgraph.TextMesh3D.Runtime
                     if (!pair.IsZero)
                     {
                         pen.x += pair.FirstAdvance * scale;
-                        m_GlyphObjects[previousObject].transform.localPosition += new Vector3(pair.FirstOffsetX * scale, 0f, pair.FirstOffsetY * scale);
+                        var previous = placements[previousPlacement];
+                        previous.position += new Vector3(pair.FirstOffsetX * scale, 0f, pair.FirstOffsetY * scale);
+                        placements[previousPlacement] = previous;
                         offset = new Vector3(pair.SecondOffsetX * scale, 0f, pair.SecondOffsetY * scale);
                         extraAdvance = pair.SecondAdvance * scale;
                     }
                 }
-                m_GlyphObjects[i].transform.localPosition = new Vector3(pen.x, pen.y, pen.z) + offset;
 
-                Glyph glyph = typeface.GetGlyph(glyphIndex);
-                GlyphSplineReader glyphSplineReader = new GlyphSplineReader(container);
-                glyphSplineReader.Read(glyph, scale);
+                placements.Add(new GlyphPlacement { character = ch, glyphIndex = glyphIndex, position = pen + offset });
 
                 //Move the pen by the font's advance width.
                 //The advance includes the side bearings, so it works for narrow glyphs and spaces alike.
                 pen.x += GetAdvanceWidth(typeface, glyphIndex) * scale + m_Spacing + extraAdvance;
                 previousGlyph = glyphIndex;
-                previousObject = i;
+                previousPlacement = placements.Count - 1;
             }
 
             if (missing.Count > 0)
             {
+                var fontName = m_Font != null ? m_Font.name : "TextMesh3D";
                 Debug.LogWarning($"TextMesh3D: font '{fontName}' has no glyph for: {string.Join(" ", missing.Select(c => $"'{c}' (U+{(int)c:X4})"))}", this);
             }
-            return true;
+            return placements;
         }
 
         private static string GetCharacterObjectName(char ch)

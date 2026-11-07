@@ -79,6 +79,9 @@ namespace Softgraph.TextMesh3D.Tests
             Undo.IncrementCurrentGroup();
             Undo.RecordObject(container, "Change font");
             container.Font = LoadFont(FontPath("Baskerville.ttf"));
+            // Like the inspector: the font change is recorded on its own, before the font bytes are cached.
+            // (Recording across the byte cache would make Undo diff ~30k array elements, which is very slow.)
+            Undo.FlushUndoRecordObjects();
             Generate(container); // caches Baskerville's bytes and typeface; joins the same undo group
             Undo.IncrementCurrentGroup();
 

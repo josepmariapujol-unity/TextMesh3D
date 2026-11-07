@@ -13,12 +13,59 @@ using UnityEditor;
 namespace Softgraph.TextMesh3D.Runtime
 {
     // Font loading: the editor caches the font file's bytes so generation also works in player builds.
-    public partial class TextMesh3DContainer
+    public partial class TextMesh3DContainer : ISerializationCallbackReceiver
     {
-        // Raw bytes of m_Font's source file (.ttf/.otf). Unity's Font asset does not expose the
-        // original file at runtime, so the editor caches it here to make generation work in builds.
-        [SerializeField, HideInInspector] private byte[] m_FontData;
+        // m_Font's source file (.ttf/.otf), base64-encoded. Unity's Font asset does not expose the original file at
+        // runtime, so the editor caches it here to make generation work in builds.
+        // Stored as one string, not a byte[]: Undo diffs a byte[] element by element, so a ~170 KB font became
+        // ~170,000 property modifications whose de-duplication is quadratic and froze the editor for minutes.
+        // A string is a single property: one modification, however large the font.
+        [SerializeField, HideInInspector] private string m_FontFile;
         [SerializeField, HideInInspector] private string m_FontDataSource;
+
+        // Before 3.0.0 the bytes were stored here. Converted to m_FontFile when an old scene or prefab is loaded.
+        [SerializeField, HideInInspector] private byte[] m_FontData;
+
+        // m_FontFile decoded, and the string it was decoded from
+        [NonSerialized] private byte[] m_FontBytes;
+        [NonSerialized] private string m_FontBytesSource;
+
+        void ISerializationCallbackReceiver.OnBeforeSerialize() { }
+
+        void ISerializationCallbackReceiver.OnAfterDeserialize()
+        {
+            // Migration from the byte[] field. Done while loading, outside any undo recording.
+            if (m_FontData != null && m_FontData.Length > 0)
+            {
+                if (string.IsNullOrEmpty(m_FontFile)) m_FontFile = Convert.ToBase64String(m_FontData);
+                m_FontData = null;
+            }
+        }
+
+        /// <summary>The font file's bytes, or null. Decoded once per font (compared by value: Unity deserializes a new
+        /// string instance on every inspector change, which must not cause a re-decode and re-parse).</summary>
+        private byte[] GetFontBytes()
+        {
+            if (string.IsNullOrEmpty(m_FontFile))
+            {
+                m_FontBytes = null;
+                m_FontBytesSource = null;
+                return null;
+            }
+            if (m_FontBytes == null || m_FontBytesSource != m_FontFile)
+            {
+                try
+                {
+                    m_FontBytes = Convert.FromBase64String(m_FontFile);
+                }
+                catch (FormatException)
+                {
+                    m_FontBytes = null;
+                }
+                m_FontBytesSource = m_FontFile;
+            }
+            return m_FontBytes;
+        }
 
 #if UNITY_EDITOR
         private void OnValidate()
@@ -26,23 +73,23 @@ namespace Softgraph.TextMesh3D.Runtime
             CacheFontData();
         }
 
-        /// <summary>Editor only: reads the font file behind m_Font into m_FontData when the font changes.</summary>
+        /// <summary>Editor only: reads the font file behind m_Font into m_FontFile when the font changes.</summary>
         public void CacheFontData()
         {
             var path = m_Font != null ? AssetDatabase.GetAssetPath(m_Font) : null;
 
             if (string.IsNullOrEmpty(path))
             {
-                if (m_FontData != null)
+                if (!string.IsNullOrEmpty(m_FontFile))
                 {
-                    m_FontData = null;
+                    m_FontFile = null;
                     m_FontDataSource = null;
                     MarkDirty();
                 }
                 return;
             }
 
-            if (m_FontData != null && m_FontData.Length > 0 && m_FontDataSource == path)
+            if (!string.IsNullOrEmpty(m_FontFile) && m_FontDataSource == path)
                 return;
 
             var fullPath = Path.GetFullPath(path); // resolves Packages/... to the real location
@@ -52,7 +99,7 @@ namespace Softgraph.TextMesh3D.Runtime
                 return;
             }
 
-            m_FontData = File.ReadAllBytes(fullPath);
+            m_FontFile = Convert.ToBase64String(File.ReadAllBytes(fullPath));
             m_FontDataSource = path;
             MarkDirty();
         }
@@ -64,8 +111,8 @@ namespace Softgraph.TextMesh3D.Runtime
         }
 #endif
 
-        // Parsed font, reused across Generate() calls. Keyed on the m_FontData array itself: assigning a new font,
-        // Undo/Redo and domain reloads all produce a new array, so a stale typeface can never be used.
+        // Parsed font, reused across Generate() calls. Keyed on the decoded byte array, which is replaced whenever
+        // the stored font changes (new font, Undo/Redo to another font, domain reload), so a stale typeface is never used.
         [NonSerialized] private Typeface m_Typeface;
         [NonSerialized] private byte[] m_TypefaceSource;
         [NonSerialized] private GlyphKerning m_TypefaceKerning;
@@ -78,7 +125,7 @@ namespace Softgraph.TextMesh3D.Runtime
         {
             if (m_TypefaceKerning == null || !ReferenceEquals(typeface, m_Typeface))
             {
-                m_TypefaceKerning = new GlyphKerning(typeface, m_FontData);
+                m_TypefaceKerning = new GlyphKerning(typeface, m_TypefaceSource);
             }
             return m_TypefaceKerning;
         }
@@ -88,24 +135,25 @@ namespace Softgraph.TextMesh3D.Runtime
 #if UNITY_EDITOR
             CacheFontData();
 #endif
-            if (m_FontData == null || m_FontData.Length == 0)
+            var bytes = GetFontBytes();
+            if (bytes == null || bytes.Length == 0)
             {
                 ClearTypefaceCache();
                 Debug.LogError("TextMesh3D: no font data. Assign a .ttf/.otf font in the editor before generating.", this);
                 return null;
             }
 
-            if (m_Typeface != null && ReferenceEquals(m_TypefaceSource, m_FontData))
+            if (m_Typeface != null && ReferenceEquals(m_TypefaceSource, bytes))
             {
                 return m_Typeface;
             }
 
             ClearTypefaceCache();
-            var typeface = ParseTypeface();
+            var typeface = ParseTypeface(bytes);
             if (typeface != null)
             {
                 m_Typeface = typeface;
-                m_TypefaceSource = m_FontData;
+                m_TypefaceSource = bytes;
             }
             return typeface;
         }
@@ -117,13 +165,13 @@ namespace Softgraph.TextMesh3D.Runtime
             m_TypefaceKerning = null;
         }
 
-        private Typeface ParseTypeface()
+        private Typeface ParseTypeface(byte[] bytes)
         {
             TypefaceParseCount++;
             Typeface typeface = null;
             try
             {
-                using (var stream = new MemoryStream(m_FontData, false))
+                using (var stream = new MemoryStream(bytes, false))
                 {
                     typeface = new OpenFontReader().Read(stream);
                 }

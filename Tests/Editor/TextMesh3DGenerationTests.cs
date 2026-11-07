@@ -460,9 +460,50 @@ namespace Softgraph.TextMesh3D.Tests
             Generate(container);
 
             var so = new SerializedObject(container);
-            var data = so.FindProperty("m_FontData");
-            Assert.IsNotNull(data, "m_FontData field missing");
-            Assert.Greater(data.arraySize, 0, "Font bytes were not cached; generation would fail in a player build");
+            var data = so.FindProperty("m_FontFile");
+            Assert.IsNotNull(data, "m_FontFile field missing");
+            Assert.IsFalse(string.IsNullOrEmpty(data.stringValue), "Font file was not cached; generation would fail in a player build");
+            CollectionAssert.AreEqual(System.IO.File.ReadAllBytes(System.IO.Path.GetFullPath(RobotoPath)),
+                System.Convert.FromBase64String(data.stringValue));
+        }
+
+        [Test]
+        public void FontCache_IsOneUndoModification_NotOnePerByte()
+        {
+            // Regression: a byte[] field made Undo record one modification per byte of the font (~170,000),
+            // and Unity's duplicate removal over them is quadratic: minutes per test in Debug editors.
+            var container = Create("A", TextMesh3DContainer.OutputMode.Spline);
+            var so = new SerializedObject(container);
+            Assert.AreEqual(SerializedPropertyType.String, so.FindProperty("m_FontFile").propertyType);
+
+            Undo.IncrementCurrentGroup();
+            Undo.RecordObject(container, "Change font");
+            container.Font = LoadFont(FontPath("Baskerville.ttf"));
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            container.Generate(); // caches the new font file while the record above is pending, then flushes
+            Undo.FlushUndoRecordObjects();
+            watch.Stop();
+
+            Assert.Less(watch.Elapsed.TotalSeconds, 5.0, "Recording a font change must not be quadratic in the font size");
+        }
+
+        [Test]
+        public void LegacyByteArrayFontData_IsMigrated()
+        {
+            var container = Create("A", TextMesh3DContainer.OutputMode.Spline);
+            var bytes = new byte[] { 0, 1, 2, 250, 251, 252, 253, 254, 255 };
+            var so = new SerializedObject(container);
+            so.FindProperty("m_FontFile").stringValue = null;
+            var legacy = so.FindProperty("m_FontData");
+            legacy.arraySize = bytes.Length;
+            for (int i = 0; i < bytes.Length; i++) legacy.GetArrayElementAtIndex(i).intValue = bytes[i];
+            // Same source as the assigned font, so OnValidate's font caching keeps the migrated bytes
+            so.FindProperty("m_FontDataSource").stringValue = RobotoPath;
+            so.ApplyModifiedPropertiesWithoutUndo(); // deserializes into the object, like loading an old scene
+
+            so.Update();
+            Assert.AreEqual(0, so.FindProperty("m_FontData").arraySize, "Old field should be cleared");
+            CollectionAssert.AreEqual(bytes, System.Convert.FromBase64String(so.FindProperty("m_FontFile").stringValue));
         }
 
         // ---------- helpers ----------

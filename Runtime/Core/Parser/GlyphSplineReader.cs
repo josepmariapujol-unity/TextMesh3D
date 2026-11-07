@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.Splines;
@@ -10,6 +11,12 @@ namespace Softgraph.TextMesh3D.Runtime
         public GlyphSplineReader(ISplineContainer splineContainer)
         {
             this.splineContainer = splineContainer;
+        }
+
+        /// <summary>Reads the outlines into a plain list (no SplineContainer component or GameObject needed).</summary>
+        public GlyphSplineReader(List<Spline> splines)
+        {
+            splineList = splines;
         }
 
         public void Read(Glyph glyph, float scale = 1)
@@ -26,14 +33,28 @@ namespace Softgraph.TextMesh3D.Runtime
 
         public void BeginRead(int contourCount)
         {
-            currentSpline = splineContainer.AddSpline();
+            currentSpline = AddSpline();
         }
 
         public void EndRead()
         {
             Debug.Assert(currentSpline.Count == 0);
-            splineContainer.RemoveSpline(currentSpline);
+            RemoveSpline(currentSpline);
             currentSpline = null;
+        }
+
+        private Spline AddSpline()
+        {
+            if (splineList == null) return splineContainer.AddSpline();
+            var spline = new Spline();
+            splineList.Add(spline);
+            return spline;
+        }
+
+        private void RemoveSpline(Spline spline)
+        {
+            if (splineList == null) splineContainer.RemoveSpline(spline);
+            else splineList.Remove(spline);
         }
 
         public void MoveTo(float x0, float y0)
@@ -83,11 +104,11 @@ namespace Softgraph.TextMesh3D.Runtime
                 currentSpline.Add(currentKnot, TangentMode.Broken);
             }
             currentSpline.Closed = true;
-            currentSpline = null;
-            currentSpline = splineContainer.AddSpline();
+            currentSpline = AddSpline();
         }
 
         private ISplineContainer splineContainer { get; set; }
+        private readonly List<Spline> splineList;
         private BezierKnot currentKnot;
         private Spline currentSpline;
     }

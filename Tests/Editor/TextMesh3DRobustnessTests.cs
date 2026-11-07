@@ -81,9 +81,9 @@ namespace Softgraph.TextMesh3D.Tests
         {
             var container = Create("A");
             var so = new SerializedObject(container);
-            var data = so.FindProperty("m_FontData");
-            data.arraySize = 16;
-            for (int i = 0; i < 16; i++) data.GetArrayElementAtIndex(i).intValue = i * 7;
+            var bytes = new byte[16];
+            for (int i = 0; i < 16; i++) bytes[i] = (byte)(i * 7);
+            so.FindProperty("m_FontFile").stringValue = System.Convert.ToBase64String(bytes);
             // Same source path as the assigned font, so the editor cache keeps the corrupt bytes
             so.FindProperty("m_FontDataSource").stringValue = RobotoPath;
             so.ApplyModifiedPropertiesWithoutUndo();

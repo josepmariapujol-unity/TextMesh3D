@@ -30,7 +30,8 @@ namespace Softgraph.TextMesh3D.Runtime
         readonly GPOS m_Gpos;
         readonly List<ushort> m_KernLookups = new List<ushort>();
         readonly bool m_UseLegacyKernTable;
-        readonly PairBuffer m_Buffer;
+        readonly byte[] m_FontData;
+        readonly int m_GposOffset; // offset of the GPOS table in m_FontData, or -1
         readonly Dictionary<uint, PairAdjustment> m_Cache = new Dictionary<uint, PairAdjustment>();
 
         public bool HasKerning => m_KernLookups.Count > 0 || m_UseLegacyKernTable;
@@ -39,19 +40,20 @@ namespace Softgraph.TextMesh3D.Runtime
         public GlyphKerning(Typeface typeface, byte[] fontData)
         {
             m_Typeface = typeface;
-            m_Buffer = new PairBuffer(typeface);
+            m_FontData = fontData;
+            m_GposOffset = FindTable(fontData, "GPOS");
 
             try
             {
                 m_Gpos = typeface.GPOSTable;
-                if (m_Gpos != null) CollectKernLookups();
+                if (m_Gpos != null && m_GposOffset >= 0) CollectKernLookups();
             }
             catch (Exception)
             {
                 m_KernLookups.Clear(); // malformed GPOS: fall back to the kern table, or no kerning
             }
 
-            m_UseLegacyKernTable = m_KernLookups.Count == 0 && HasTable(fontData, "kern");
+            m_UseLegacyKernTable = m_KernLookups.Count == 0 && FindTable(fontData, "kern") >= 0;
         }
 
         public PairAdjustment GetAdjustment(ushort first, ushort second)
@@ -74,31 +76,184 @@ namespace Softgraph.TextMesh3D.Runtime
             return result;
         }
 
+        // ---------- GPOS pair positioning, read directly from the font file ----------
+        // Typography decides which lookups belong to the 'kern' feature (above), but the pair adjustments are read
+        // here: Typography's PairPos format 2 skips glyphs that their ClassDef doesn't list, while the OpenType spec
+        // says those are class 0. Roboto keeps most pairs in class 0 rows ("AV", "AT", ...), so they lost their kerning.
+
         PairAdjustment FromGpos(ushort first, ushort second)
         {
             var total = new PairAdjustment();
+            var d = m_FontData;
+            int lookupList = m_GposOffset + U16(d, m_GposOffset + 8);
+
             foreach (var lookupIndex in m_KernLookups)
             {
-                var subTables = m_Gpos.LookupList[lookupIndex].SubTables;
-                if (subTables == null) continue;
+                int lookup = lookupList + U16(d, lookupList + 2 + 2 * lookupIndex);
+                int type = U16(d, lookup);
+                int subTableCount = U16(d, lookup + 4);
 
-                foreach (var subTable in subTables)
+                for (int s = 0; s < subTableCount; s++)
                 {
-                    m_Buffer.Reset(first, second);
-                    subTable.DoGlyphPosition(m_Buffer, 0, 2);
-                    if (!m_Buffer.Touched) continue;
+                    int subTable = lookup + U16(d, lookup + 6 + 2 * s);
+                    int subType = type;
+                    if (type == 9) // extension: the real subtable is at a 32-bit offset
+                    {
+                        subType = U16(d, subTable + 2);
+                        subTable += (int)U32(d, subTable + 4);
+                    }
+                    if (subType != 2) continue; // only pair adjustment is kerning
 
-                    total.FirstAdvance += m_Buffer.Advance0;
-                    total.SecondAdvance += m_Buffer.Advance1;
-                    total.FirstOffsetX += m_Buffer.OffsetX0;
-                    total.FirstOffsetY += m_Buffer.OffsetY0;
-                    total.SecondOffsetX += m_Buffer.OffsetX1;
-                    total.SecondOffsetY += m_Buffer.OffsetY1;
-                    break; // first matching subtable wins
+                    if (TryPairPos(subTable, first, second, ref total)) break; // first matching subtable wins
                 }
             }
             return total;
         }
+
+        /// <summary>PairPos formats 1 (glyph pairs) and 2 (class pairs). Returns false when the subtable doesn't apply.</summary>
+        bool TryPairPos(int subTable, ushort first, ushort second, ref PairAdjustment total)
+        {
+            var d = m_FontData;
+            int format = U16(d, subTable);
+            int coverage = subTable + U16(d, subTable + 2);
+            int valueFormat1 = U16(d, subTable + 4);
+            int valueFormat2 = U16(d, subTable + 6);
+            int size1 = ValueRecordSize(valueFormat1);
+            int size2 = ValueRecordSize(valueFormat2);
+
+            int coverageIndex = CoverageIndex(coverage, first);
+            if (coverageIndex < 0) return false;
+
+            int record;
+            if (format == 1)
+            {
+                int pairSetCount = U16(d, subTable + 8);
+                if (coverageIndex >= pairSetCount) return false;
+                int pairSet = subTable + U16(d, subTable + 10 + 2 * coverageIndex);
+                int count = U16(d, pairSet);
+                int recordSize = 2 + size1 + size2;
+
+                // PairValueRecords are sorted by second glyph
+                int lo = 0, hi = count - 1;
+                record = -1;
+                while (lo <= hi)
+                {
+                    int mid = (lo + hi) >> 1;
+                    int at = pairSet + 2 + mid * recordSize;
+                    int glyph = U16(d, at);
+                    if (glyph == second) { record = at + 2; break; }
+                    if (glyph < second) lo = mid + 1; else hi = mid - 1;
+                }
+                if (record < 0) return false; // first glyph covered but no pair: try the next subtable
+            }
+            else if (format == 2)
+            {
+                int classDef1 = subTable + U16(d, subTable + 8);
+                int classDef2 = subTable + U16(d, subTable + 10);
+                int class1Count = U16(d, subTable + 12);
+                int class2Count = U16(d, subTable + 14);
+                int class1 = ClassOf(classDef1, first);   // glyphs not listed are class 0
+                int class2 = ClassOf(classDef2, second);
+                if (class1 >= class1Count || class2 >= class2Count) return false;
+                record = subTable + 16 + (class1 * class2Count + class2) * (size1 + size2);
+            }
+            else
+            {
+                return false;
+            }
+
+            ReadValueRecord(record, valueFormat1, out var xPlacement1, out var yPlacement1, out var xAdvance1);
+            ReadValueRecord(record + size1, valueFormat2, out var xPlacement2, out var yPlacement2, out var xAdvance2);
+            total.FirstAdvance += xAdvance1;
+            total.FirstOffsetX += xPlacement1;
+            total.FirstOffsetY += yPlacement1;
+            total.SecondAdvance += xAdvance2;
+            total.SecondOffsetX += xPlacement2;
+            total.SecondOffsetY += yPlacement2;
+            return true;
+        }
+
+        /// <summary>Index of the glyph in a Coverage table, or -1.</summary>
+        int CoverageIndex(int table, ushort glyph)
+        {
+            var d = m_FontData;
+            int format = U16(d, table);
+            int count = U16(d, table + 2);
+            int lo = 0, hi = count - 1;
+            if (format == 1)
+            {
+                while (lo <= hi)
+                {
+                    int mid = (lo + hi) >> 1;
+                    int g = U16(d, table + 4 + 2 * mid);
+                    if (g == glyph) return mid;
+                    if (g < glyph) lo = mid + 1; else hi = mid - 1;
+                }
+            }
+            else if (format == 2)
+            {
+                while (lo <= hi)
+                {
+                    int mid = (lo + hi) >> 1;
+                    int range = table + 4 + 6 * mid;
+                    int start = U16(d, range), end = U16(d, range + 2);
+                    if (glyph < start) hi = mid - 1;
+                    else if (glyph > end) lo = mid + 1;
+                    else return U16(d, range + 4) + glyph - start;
+                }
+            }
+            return -1;
+        }
+
+        /// <summary>Class of the glyph in a ClassDef table; 0 when it isn't listed (OpenType spec).</summary>
+        int ClassOf(int table, ushort glyph)
+        {
+            var d = m_FontData;
+            int format = U16(d, table);
+            if (format == 1)
+            {
+                int startGlyph = U16(d, table + 2);
+                int count = U16(d, table + 4);
+                int i = glyph - startGlyph;
+                return i >= 0 && i < count ? U16(d, table + 6 + 2 * i) : 0;
+            }
+            if (format == 2)
+            {
+                int count = U16(d, table + 2);
+                int lo = 0, hi = count - 1;
+                while (lo <= hi)
+                {
+                    int mid = (lo + hi) >> 1;
+                    int range = table + 4 + 6 * mid;
+                    int start = U16(d, range), end = U16(d, range + 2);
+                    if (glyph < start) hi = mid - 1;
+                    else if (glyph > end) lo = mid + 1;
+                    else return U16(d, range + 4);
+                }
+            }
+            return 0;
+        }
+
+        // ValueRecord: XPlacement, YPlacement, XAdvance, YAdvance, then 4 device-table offsets, each present if its bit is set.
+        static int ValueRecordSize(int valueFormat)
+        {
+            int bits = valueFormat & 0xFF, size = 0;
+            for (; bits != 0; bits >>= 1) size += (bits & 1) * 2;
+            return size;
+        }
+
+        void ReadValueRecord(int at, int valueFormat, out short xPlacement, out short yPlacement, out short xAdvance)
+        {
+            var d = m_FontData;
+            xPlacement = yPlacement = xAdvance = 0;
+            if ((valueFormat & 0x0001) != 0) { xPlacement = (short)U16(d, at); at += 2; }
+            if ((valueFormat & 0x0002) != 0) { yPlacement = (short)U16(d, at); at += 2; }
+            if ((valueFormat & 0x0004) != 0) { xAdvance = (short)U16(d, at); }
+            // YAdvance and device tables (hinting) don't apply to horizontal layout of outlines
+        }
+
+        static int U16(byte[] d, int offset) => (d[offset] << 8) | d[offset + 1];
+        static uint U32(byte[] d, int offset) => ((uint)d[offset] << 24) | ((uint)d[offset + 1] << 16) | ((uint)d[offset + 2] << 8) | d[offset + 3];
 
         /// <summary>Lookups of the 'kern' feature for Latin (or the default script), in lookup-list order.</summary>
         void CollectKernLookups()
@@ -141,79 +296,22 @@ namespace Softgraph.TextMesh3D.Runtime
             m_KernLookups.AddRange(indices);
         }
 
-        /// <summary>Checks the sfnt table directory for a table tag.</summary>
-        static bool HasTable(byte[] data, string tag)
+        /// <summary>Offset of a table in the sfnt table directory, or -1 if the font has no such table.</summary>
+        static int FindTable(byte[] data, string tag)
         {
-            if (data == null || data.Length < 12 || tag.Length != 4) return false;
+            if (data == null || data.Length < 12 || tag.Length != 4) return -1;
             int numTables = (data[4] << 8) | data[5];
             for (int i = 0; i < numTables; i++)
             {
                 int record = 12 + i * 16;
-                if (record + 4 > data.Length) return false;
+                if (record + 16 > data.Length) return -1;
                 if (data[record] == tag[0] && data[record + 1] == tag[1] && data[record + 2] == tag[2] && data[record + 3] == tag[3])
-                    return true;
+                {
+                    long offset = U32(data, record + 8);
+                    return offset < data.Length ? (int)offset : -1;
+                }
             }
-            return false;
-        }
-
-        /// <summary>Two-glyph buffer that records what a GPOS subtable does to the pair.</summary>
-        sealed class PairBuffer : IGlyphPositions
-        {
-            readonly Typeface m_Typeface;
-            ushort m_Glyph0, m_Glyph1;
-            short m_Width0, m_Width1;
-
-            public bool Touched;
-            public short Advance0, Advance1, OffsetX0, OffsetY0, OffsetX1, OffsetY1;
-
-            public PairBuffer(Typeface typeface) { m_Typeface = typeface; }
-
-            public void Reset(ushort first, ushort second)
-            {
-                m_Glyph0 = first;
-                m_Glyph1 = second;
-                m_Width0 = (short)m_Typeface.GetAdvanceWidthFromGlyphIndex(first);
-                m_Width1 = (short)m_Typeface.GetAdvanceWidthFromGlyphIndex(second);
-                Touched = false;
-                Advance0 = Advance1 = OffsetX0 = OffsetY0 = OffsetX1 = OffsetY1 = 0;
-            }
-
-            public int Count => 2;
-
-            public GlyphClassKind GetGlyphClassKind(int index) => m_Typeface.GetGlyph(index == 0 ? m_Glyph0 : m_Glyph1).GlyphClass;
-
-            public void AppendGlyphOffset(int index, short appendOffsetX, short appendOffsetY)
-            {
-                Touched = true;
-                if (index == 0) { OffsetX0 += appendOffsetX; OffsetY0 += appendOffsetY; }
-                else { OffsetX1 += appendOffsetX; OffsetY1 += appendOffsetY; }
-            }
-
-            public void AppendGlyphAdvance(int index, short appendAdvX, short appendAdvY)
-            {
-                Touched = true;
-                if (index == 0) Advance0 += appendAdvX;
-                else Advance1 += appendAdvX;
-            }
-
-            public ushort GetGlyph(int index, out short advW)
-            {
-                advW = index == 0 ? m_Width0 : m_Width1;
-                return index == 0 ? m_Glyph0 : m_Glyph1;
-            }
-
-            public ushort GetGlyph(int index, out ushort inputOffset, out short offsetX, out short offsetY, out short advW)
-            {
-                inputOffset = (ushort)index;
-                GetOffset(index, out offsetX, out offsetY);
-                return GetGlyph(index, out advW);
-            }
-
-            public void GetOffset(int index, out short offsetX, out short offsetY)
-            {
-                offsetX = index == 0 ? OffsetX0 : OffsetX1;
-                offsetY = index == 0 ? OffsetY0 : OffsetY1;
-            }
+            return -1;
         }
     }
 }
