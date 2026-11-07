@@ -83,6 +83,24 @@ Import **TextMesh3D Examples** from the Package Manager (Samples tab) for a comp
 
 See [CHANGELOG.md](CHANGELOG.md). In short: `Enum` is now `OutputMode`, `Function()` is now `Generate()`, settings are properties (`Text`, `Font`, …) instead of public fields, and `Size` is now the em size (multiply old values by about 20 to keep the same size with 2048-unit fonts).
 
+## Running the tests
+
+The package includes edit mode and play mode tests (Unity Test Framework, installed with this package).
+
+1. In your project's `Packages/manifest.json`, add the package to `testables` (needed unless the package is embedded in the project's `Packages/` folder):
+
+   ```json
+   {
+     "dependencies": { "...": "..." },
+     "testables": [ "com.softgraph.textmesh3d" ]
+   }
+   ```
+
+2. Open **Window > General > Test Runner**.
+3. Run the **EditMode** and **PlayMode** tabs.
+
+Snapshot tests compare the generated geometry with files in `Tests/Editor/Baselines`. After an intended change, review the `*.received.txt` files written next to them and replace the baselines.
+
 ## Third-party software
 
 This package includes third-party components:

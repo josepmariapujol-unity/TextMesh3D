@@ -10,7 +10,8 @@
   "license": "MIT",
   "dependencies": {
     "com.unity.splines": "2.8.1",
-    "com.unity.mathematics": "1.2.1"
+    "com.unity.mathematics": "1.2.1",
+    "com.unity.test-framework": "1.1.33"
   },
   "samples": [
     {

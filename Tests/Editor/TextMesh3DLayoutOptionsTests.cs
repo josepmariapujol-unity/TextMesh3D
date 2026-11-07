@@ -153,6 +153,52 @@ namespace Softgraph.TextMesh3D.Tests
             Assert.AreEqual(xy.size.z, xz.size.y, k_Eps);
         }
 
+        [Test]
+        public void Plane_XY_IsInTheGlyphDataNotTheRootTransform()
+        {
+            const float extrusion = 0.5f;
+            var c = Create("H", TextMesh3DContainer.OutputMode.Mesh, TextMesh3DContainer.TextPlane.XY, extrusion);
+            var glyphs = Generate(c);
+
+            Assert.AreEqual(Quaternion.identity, c.GeneratedRoot.transform.localRotation, "The root must not carry the orientation");
+            Assert.AreEqual(Vector3.zero, c.GeneratedRoot.transform.localPosition);
+
+            // In the glyph's own space the letter already stands up: tall in Y, extrusion depth in Z.
+            var b = GetMesh(glyphs[0]).bounds;
+            Assert.Greater(b.size.y, 0.5f, "Capital H should be ~0.7 units tall along Y");
+            Assert.AreEqual(extrusion, b.size.z, k_Eps, "Extrusion should be along Z");
+            Assert.AreEqual(0f, glyphs[0].localPosition.y, k_Eps);
+        }
+
+        [Test]
+        public void Plane_XY_SurvivesRootTransformReset()
+        {
+            var c = Create("H", TextMesh3DContainer.OutputMode.Surface, TextMesh3DContainer.TextPlane.XY);
+            Generate(c);
+            c.GeneratedRoot.transform.localRotation = Quaternion.identity; // e.g. "Reset" on the generated object
+
+            var b = LocalBounds(c);
+            Assert.Greater(b.size.y, 0.5f, "Text must still stand up");
+            Assert.AreEqual(0f, b.size.z, k_Eps, "Surface output must be flat on XY");
+        }
+
+        [Test]
+        public void Plane_XY_FailedRegenerate_DoesNotRotateOutputAgain()
+        {
+            var c = Create("H", TextMesh3DContainer.OutputMode.Mesh, TextMesh3DContainer.TextPlane.XY);
+            c.Generate();
+            var before = LocalBounds(c);
+
+            // Font removed: generation fails and must leave the previous output untouched
+            c.Font = null;
+            LogAssert.Expect(LogType.Error, new Regex("no font data"));
+            c.Generate();
+
+            var after = LocalBounds(c);
+            Assert.AreEqual(before.center, after.center);
+            Assert.AreEqual(before.size, after.size);
+        }
+
         // ---------- Line Spacing ----------
 
         [TestCase(2f)]

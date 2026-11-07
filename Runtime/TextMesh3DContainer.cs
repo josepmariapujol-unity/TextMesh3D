@@ -132,17 +132,11 @@ namespace Softgraph.TextMesh3D.Runtime
                 }
                 else
                 {
-                    switch (m_Output)
+                    // Only touch glyphs created by this call: on failure m_GlyphObjects may still list the previous output.
+                    if (LayoutGlyphs())
                     {
-                        case OutputMode.Spline:
-                            LayoutGlyphs();
-                            break;
-                        case OutputMode.Surface:
-                            if (LayoutGlyphs()) BuildGlyphMeshes(extrude: false);
-                            break;
-                        case OutputMode.Mesh:
-                            if (LayoutGlyphs()) BuildGlyphMeshes(extrude: true);
-                            break;
+                        if (m_Output != OutputMode.Spline) BuildGlyphMeshes(extrude: m_Output == OutputMode.Mesh);
+                        ApplyPlaneToGlyphs();
                     }
                 }
             }
@@ -199,6 +193,67 @@ namespace Softgraph.TextMesh3D.Runtime
             if (m_Plane != TextPlane.XY) return Matrix4x4.identity;
             float depth = m_Output == OutputMode.Mesh ? m_Extrusion : 0f;
             return Matrix4x4.TRS(new Vector3(0f, 0f, depth), Quaternion.Euler(-90f, 0f, 0f), Vector3.one);
+        }
+
+        /// <summary>
+        /// Writes the plane orientation into the per-glyph output itself (glyph positions, mesh vertices, normals,
+        /// tangents and spline knots), so the result is correct regardless of the generated root's transform.
+        /// Group Output already applies it while merging (see GroupIntoRootMesh).
+        /// </summary>
+        private void ApplyPlaneToGlyphs()
+        {
+            if (m_Plane == TextPlane.XZ || m_GlyphObjects == null) return;
+
+            var plane = GetPlaneMatrix();
+            var rotation = plane.rotation;
+            foreach (var glyph in m_GlyphObjects)
+            {
+                if (glyph == null) continue;
+                var t = glyph.transform;
+                t.localPosition = plane.MultiplyPoint3x4(t.localPosition);
+
+                if (glyph.TryGetComponent<MeshFilter>(out var filter) && filter.sharedMesh != null)
+                {
+                    RotateMesh(filter.sharedMesh, rotation);
+                }
+                if (glyph.TryGetComponent<SplineContainer>(out var splines))
+                {
+                    foreach (var spline in splines.Splines) RotateSpline(spline, rotation);
+                }
+            }
+        }
+
+        private static void RotateMesh(Mesh mesh, Quaternion rotation)
+        {
+            var vertices = mesh.vertices;
+            var normals = mesh.normals;
+            var tangents = mesh.tangents;
+            for (int i = 0; i < vertices.Length; i++) vertices[i] = rotation * vertices[i];
+            for (int i = 0; i < normals.Length; i++) normals[i] = rotation * normals[i];
+            for (int i = 0; i < tangents.Length; i++)
+            {
+                var v = rotation * new Vector3(tangents[i].x, tangents[i].y, tangents[i].z);
+                tangents[i] = new Vector4(v.x, v.y, v.z, tangents[i].w); // w (handedness) is unchanged by a rotation
+            }
+            mesh.vertices = vertices;
+            if (normals.Length > 0) mesh.normals = normals;
+            if (tangents.Length > 0) mesh.tangents = tangents;
+            mesh.RecalculateBounds();
+        }
+
+        private static void RotateSpline(Spline spline, Quaternion rotation)
+        {
+            quaternion r = rotation;
+            for (int k = 0; k < spline.Count; k++)
+            {
+                var knot = spline[k];
+                // Knot rotations are identity, so tangents are in spline space and rotate like positions.
+                spline.SetKnot(k, new BezierKnot(
+                    math.mul(r, knot.Position),
+                    math.mul(r, knot.TangentIn),
+                    math.mul(r, knot.TangentOut),
+                    knot.Rotation));
+            }
         }
 
         private const string k_UndoName = "Generate TextMesh3D";
@@ -261,11 +316,6 @@ namespace Softgraph.TextMesh3D.Runtime
             ClearPreviousOutput();
             m_GeneratedRoot = new GameObject(fontName);
             m_GeneratedRoot.transform.SetParent(transform, false);
-
-            // Glyphs are always laid out on XZ; the root orients them onto the chosen plane (see GetPlaneMatrix).
-            var plane = GetPlaneMatrix();
-            m_GeneratedRoot.transform.localPosition = plane.GetColumn(3);
-            m_GeneratedRoot.transform.localRotation = plane.rotation;
 
             m_GlyphObjects = new GameObject[m_Text.Length];
 
