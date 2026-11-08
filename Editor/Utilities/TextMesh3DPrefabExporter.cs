@@ -25,7 +25,7 @@ namespace Softgraph.TextMesh3D.Editor
     {
         const string k_DialogTitle = "Save TextMesh3D as Prefab";
 
-        /// <summary>True when the container has generated output that can be saved (press Apply first otherwise).</summary>
+        /// <summary>True when the container has generated output that can be saved.</summary>
         public static bool HasOutput(TextMesh3DContainer container)
         {
             if (container == null) return false;
@@ -38,7 +38,7 @@ namespace Softgraph.TextMesh3D.Editor
         {
             if (!HasOutput(container))
             {
-                EditorUtility.DisplayDialog(k_DialogTitle, "There is no generated text to save. Press Apply first.", "OK");
+                EditorUtility.DisplayDialog(k_DialogTitle, "There is no generated text to save. Enter some text first.", "OK");
                 return null;
             }
 
@@ -72,7 +72,7 @@ namespace Softgraph.TextMesh3D.Editor
             }
             if (!HasOutput(container))
             {
-                Debug.LogError("TextMesh3D: nothing to save. Press Apply to generate the text first.", container);
+                Debug.LogError("TextMesh3D: nothing to save. The text has no generated output (call Generate() first).", container);
                 return null;
             }
 

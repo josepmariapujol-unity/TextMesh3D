@@ -113,14 +113,14 @@ namespace Softgraph.TextMesh3D.Runtime
         public void Generate()
         {
 #if UNITY_EDITOR
-            // In edit mode, one Apply is one undo step: it restores the previous output (and grouped mesh).
+            // In edit mode, one Generate is one undo step: it restores the previous output (and grouped mesh).
             bool recordUndo = !Application.isPlaying;
             int undoGroup = -1;
             if (recordUndo)
             {
                 // Turn the caller's pending Undo.RecordObject changes (e.g. "RecordObject, then Text = ...") into undo
                 // records first. A complete snapshot of an object discards its pending RecordObject diff, so without
-                // this the edit that triggered Generate (Auto Apply, editor scripts) could not be undone.
+                // this the edit that triggered Generate (live preview, editor scripts) could not be undone.
                 Undo.FlushUndoRecordObjects();
 
                 // Cache the font file before the snapshot below. It is derived data (re-read whenever it doesn't match

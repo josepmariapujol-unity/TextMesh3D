@@ -8,11 +8,10 @@ using static Softgraph.TextMesh3D.Tests.TextMesh3DTestUtility;
 
 namespace Softgraph.TextMesh3D.Tests
 {
-    /// <summary>Auto Apply: debounced regeneration after edits, merged into the edit's undo step.</summary>
+    /// <summary>Live preview (always on): debounced regeneration after edits, merged into the edit's undo step.</summary>
     class TextMesh3DAutoApplyTests
     {
         readonly List<TextMesh3DContainer> m_Created = new List<TextMesh3DContainer>();
-        bool m_WasEnabled;
 
         TextMesh3DContainer Create(string text)
         {
@@ -23,18 +22,10 @@ namespace Softgraph.TextMesh3D.Tests
 
         static int GlyphCount(TextMesh3DContainer c) => c.GeneratedRoot != null ? c.GeneratedRoot.transform.childCount : 0;
 
-        [SetUp]
-        public void SetUp()
-        {
-            m_WasEnabled = TextMesh3DAutoApply.Enabled; // a per-user preference: restore it afterwards
-            TextMesh3DAutoApply.Enabled = true;
-        }
-
         [TearDown]
         public void TearDown()
         {
             TextMesh3DAutoApply.Cancel();
-            TextMesh3DAutoApply.Enabled = m_WasEnabled;
             foreach (var c in m_Created) TextMesh3DTestUtility.Destroy(c);
             m_Created.Clear();
         }
@@ -76,30 +67,25 @@ namespace Softgraph.TextMesh3D.Tests
         }
 
         [Test]
-        public void Disabled_DoesNothing()
+        public void TextWithoutOutput_IsGeneratedWhenShown()
         {
-            TextMesh3DAutoApply.Enabled = false;
-            var c = Create("AB");
-            c.Generate();
+            var withoutOutput = Create("AB");             // never generated, like a component added by hand
+            var withOutput = Create("CD");
+            withOutput.Generate();
+            var root = withOutput.GeneratedRoot;
 
-            c.Text = "ABC";
-            TextMesh3DAutoApply.Schedule(new Object[] { c });
-            Assert.IsFalse(TextMesh3DAutoApply.IsPending);
-
+            TextMesh3DAutoApply.ScheduleIfMissingOutput(new Object[] { withoutOutput, withOutput });
             TextMesh3DAutoApply.Flush();
-            Assert.AreEqual(2, GlyphCount(c));
+
+            Assert.AreEqual(2, GlyphCount(withoutOutput));
+            Assert.AreSame(root, withOutput.GeneratedRoot, "Text that already has output must not be regenerated just by showing it");
         }
 
         [Test]
-        public void TurningOff_CancelsPending()
+        public void EmptyText_IsNotScheduledWhenShown()
         {
-            var c = Create("AB");
-            c.Generate();
-            c.Text = "ABC";
-            TextMesh3DAutoApply.Schedule(new Object[] { c });
-
-            TextMesh3DAutoApply.Enabled = false;
-
+            var c = Create("");
+            TextMesh3DAutoApply.ScheduleIfMissingOutput(new Object[] { c });
             Assert.IsFalse(TextMesh3DAutoApply.IsPending);
         }
 

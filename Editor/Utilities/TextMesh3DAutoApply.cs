@@ -6,51 +6,33 @@ using UnityEngine;
 namespace Softgraph.TextMesh3D.Editor
 {
     /// <summary>
-    /// Auto Apply (live preview): regenerates TextMesh3D objects shortly after their settings are edited in the
-    /// inspector or the TextMesh3D window, instead of requiring Apply.
+    /// Live preview: regenerates TextMesh3D objects shortly after their settings are edited in the inspector or the
+    /// TextMesh3D window. Always on; there is no Apply button.
     /// </summary>
     /// <remarks>
     /// - Debounced: edits made in quick succession (typing, dragging a value) regenerate once, after
     ///   <see cref="DelaySeconds"/> without further changes.
     /// - Undo: the regeneration is merged into the undo step of the edit that triggered it, so one Undo reverts the
     ///   setting and its output together (no step where the output doesn't match the settings).
-    /// - The on/off choice is a per-user editor preference, not stored in the scene.
+    /// - Text that has no output yet (component added by hand, scene saved without output) is generated when the
+    ///   inspector or window shows it.
     /// </remarks>
     public static class TextMesh3DAutoApply
     {
-        const string k_PrefKey = "Softgraph.TextMesh3D.AutoApply";
-
         /// <summary>Seconds without further edits before regenerating.</summary>
         public const double DelaySeconds = 0.25;
-
-        internal static readonly GUIContent ToggleLabel = new GUIContent("Auto Apply",
-            "Regenerate automatically shortly after a setting changes. Turn off for very long text or slow fonts and press Apply instead.");
 
         static readonly HashSet<TextMesh3DContainer> s_Pending = new HashSet<TextMesh3DContainer>();
         static double s_Deadline;
         static int s_UndoGroup = -1;
         static bool s_Hooked;
 
-        /// <summary>Whether settings changes regenerate automatically (editor preference, on by default).</summary>
-        public static bool Enabled
-        {
-            get => EditorPrefs.GetBool(k_PrefKey, true);
-            set
-            {
-                if (value == Enabled) return;
-                EditorPrefs.SetBool(k_PrefKey, value);
-                if (!value) Cancel();
-            }
-        }
-
         /// <summary>True while a regeneration is waiting for the debounce delay.</summary>
         public static bool IsPending => s_Pending.Count > 0;
 
-        /// <summary>Regenerates the containers after the debounce delay (restarted by every call). No-op when disabled.</summary>
+        /// <summary>Regenerates the containers after the debounce delay (restarted by every call).</summary>
         public static void Schedule(IEnumerable<Object> containers)
         {
-            if (!Enabled) return;
-
             foreach (var obj in containers)
             {
                 if (obj is TextMesh3DContainer container && container != null) s_Pending.Add(container);
@@ -93,7 +75,7 @@ namespace Softgraph.TextMesh3D.Editor
             }
         }
 
-        /// <summary>Drops pending regenerations (e.g. Apply was pressed, which regenerates right away).</summary>
+        /// <summary>Drops pending regenerations.</summary>
         public static void Cancel()
         {
             s_Pending.Clear();
@@ -110,43 +92,25 @@ namespace Softgraph.TextMesh3D.Editor
         // so the pending regeneration is no longer needed (and must not land in the wrong undo step).
         static void OnUndoRedo() => Cancel();
 
-        /// <summary>Removes containers from the pending set, e.g. because they are being regenerated right now.</summary>
-        static void Remove(IEnumerable<Object> containers)
-        {
-            foreach (var obj in containers)
-            {
-                if (obj is TextMesh3DContainer container) s_Pending.Remove(container);
-            }
-            if (s_Pending.Count == 0) Cancel();
-        }
-
         static void Update()
         {
             if (EditorApplication.timeSinceStartup >= s_Deadline) Flush();
         }
 
-        /// <summary>"Auto Apply" toggle plus Apply button, shared by the inspector and the TextMesh3D window.</summary>
-        internal static void DrawApplyControls(Object[] targets, string applyLabel)
+        /// <summary>Schedules the containers that have text but no generated output yet.</summary>
+        public static void ScheduleIfMissingOutput(IEnumerable<Object> containers)
         {
-            using (new EditorGUILayout.HorizontalScope())
+            var missing = new List<Object>();
+            foreach (var obj in containers)
             {
-                EditorGUI.BeginChangeCheck();
-                bool enabled = EditorGUILayout.ToggleLeft(ToggleLabel, Enabled, GUILayout.Width(90f));
-                if (EditorGUI.EndChangeCheck())
+                if (obj is TextMesh3DContainer container && container != null
+                    && !string.IsNullOrEmpty(container.Text) && !TextMesh3DPrefabExporter.HasOutput(container)
+                    && !EditorUtility.IsPersistent(container)) // not a prefab asset in the Project window
                 {
-                    Enabled = enabled;
-                    if (enabled) Schedule(targets); // bring the output up to date with the current settings
-                }
-
-                if (GUILayout.Button(applyLabel))
-                {
-                    Remove(targets); // regenerating now; a pending one would only repeat the work
-                    foreach (var t in targets)
-                    {
-                        if (t is TextMesh3DContainer container && container != null) container.Generate();
-                    }
+                    missing.Add(container);
                 }
             }
+            if (missing.Count > 0) Schedule(missing);
         }
     }
 }

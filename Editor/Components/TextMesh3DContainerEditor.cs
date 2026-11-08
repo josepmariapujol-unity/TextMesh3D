@@ -37,6 +37,9 @@ namespace Softgraph.TextMesh3D.Editor
             m_CurveSegments = serializedObject.FindProperty("m_CurveSegments");
             m_Plane = serializedObject.FindProperty("m_Plane");
             m_LineSpacing = serializedObject.FindProperty("m_LineSpacing");
+
+            // No Apply button: text without output (added by hand, scene saved without it) is generated when shown.
+            TextMesh3DAutoApply.ScheduleIfMissingOutput(targets);
         }
 
         public override void OnInspectorGUI()
@@ -77,7 +80,6 @@ namespace Softgraph.TextMesh3D.Editor
             serializedObject.ApplyModifiedProperties();
             if (changed) TextMesh3DAutoApply.Schedule(targets);
 
-            TextMesh3DAutoApply.DrawApplyControls(targets, targets.Length > 1 ? $"Apply ({targets.Length} objects)" : "Apply");
 
             var container = (TextMesh3DContainer) target;
             using (new EditorGUI.DisabledScope(targets.Length != 1 || !TextMesh3DPrefabExporter.HasOutput(container)))
@@ -100,7 +102,14 @@ namespace Softgraph.TextMesh3D.Editor
         }
 
         internal const string k_SaveAsPrefabTooltip =
-            "Save the generated text as a prefab with its meshes stored inside, without the TextMesh3D component. Press Apply first.";
+            "Save the generated text as a prefab with its meshes stored inside, without the TextMesh3D component.";
+
+        /// <summary>Manual fallback, e.g. after the font file was reimported. Settings changes regenerate on their own.</summary>
+        [MenuItem("CONTEXT/TextMesh3DContainer/Regenerate")]
+        static void RegenerateContextMenu(MenuCommand command)
+        {
+            ((TextMesh3DContainer) command.context).Generate();
+        }
 
         [MenuItem("CONTEXT/TextMesh3DContainer/Save as Prefab...")]
         static void SaveAsPrefabContextMenu(MenuCommand command)

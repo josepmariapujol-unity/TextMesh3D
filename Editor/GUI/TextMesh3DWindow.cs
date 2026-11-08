@@ -63,6 +63,8 @@ namespace Softgraph.TextMesh3D.Editor
             m_CurveSegments = serializedObject.FindProperty("m_CurveSegments");
             m_Plane = serializedObject.FindProperty("m_Plane");
             m_LineSpacing = serializedObject.FindProperty("m_LineSpacing");
+
+            TextMesh3DAutoApply.ScheduleIfMissingOutput(new Object[] { container });
         }
 
         private void OnGUI()
@@ -117,7 +119,6 @@ namespace Softgraph.TextMesh3D.Editor
             serializedObject.ApplyModifiedProperties();
             if (changed) TextMesh3DAutoApply.Schedule(new Object[] { targetContainer });
 
-            TextMesh3DAutoApply.DrawApplyControls(new Object[] { targetContainer }, "Apply");
 
             using (new EditorGUI.DisabledScope(!TextMesh3DPrefabExporter.HasOutput(targetContainer)))
             {
