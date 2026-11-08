@@ -20,7 +20,7 @@ namespace Softgraph.TextMesh3D.Editor
     public static class TextMesh3DAutoApply
     {
         /// <summary>Seconds without further edits before regenerating.</summary>
-        public const double DelaySeconds = 0.25;
+        public const double DelaySeconds = 0.12;
 
         static readonly HashSet<TextMesh3DContainer> s_Pending = new HashSet<TextMesh3DContainer>();
         static double s_Deadline;
